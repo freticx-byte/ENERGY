@@ -3,8 +3,8 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import FSInputFile
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.types import FSInputFile, ReplyKeyboardMarkup, KeyboardButton
 from openpyxl import Workbook, load_workbook
 from datetime import datetime, timedelta
 import os
@@ -18,7 +18,19 @@ EXCEL_FILE = "Ж учета энергоресурсов.xlsx"
 class EnergyForm(StatesGroup):
     choosing_counter = State()
     entering_value = State()
-    choosing_date = State()
+
+
+# ГЛАВНОЕ МЕНЮ
+def get_main_menu():
+    builder = ReplyKeyboardBuilder()
+    builder.add(KeyboardButton(text="📊 Статистика"))
+    builder.add(KeyboardButton(text="📝 Ввести показания"))
+    builder.add(KeyboardButton(text="📋 Все счётчики"))
+    builder.add(KeyboardButton(text="✅ Счётчики с данными"))
+    builder.add(KeyboardButton(text="📁 Скачать Excel"))
+    builder.add(KeyboardButton(text="❓ Помощь"))
+    builder.adjust(2)
+    return builder.as_markup(resize_keyboard=True)
 
 
 # СПИСОК СЧЁТЧИКОВ
@@ -44,19 +56,25 @@ def init_excel():
         wb.save(EXCEL_FILE)
 
 
-def ensure_date_exists(date_str):
+def get_today_str():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def ensure_today_exists():
+    """Проверяет, есть ли сегодняшняя дата в файле"""
+    today = get_today_str()
     try:
         wb = load_workbook(EXCEL_FILE)
         ws = wb.active
 
         date_exists = False
         for row in range(2, ws.max_row + 1):
-            if ws.cell(row, 1).value == date_str:
+            if ws.cell(row, 1).value == today:
                 date_exists = True
                 break
 
         if not date_exists:
-            ws.append([date_str, ""] + [0] * len(COUNTERS))
+            ws.append([today, ""] + [0] * len(COUNTERS))
             wb.save(EXCEL_FILE)
 
         wb.close()
@@ -64,9 +82,11 @@ def ensure_date_exists(date_str):
         print(f"Ошибка: {e}")
 
 
-def update_reading(counter_name, date_str, value, record_time):
+def update_reading(counter_name, value, record_time):
+    """Обновляет показание счётчика на сегодняшнюю дату"""
     try:
-        ensure_date_exists(date_str)
+        today = get_today_str()
+        ensure_today_exists()
 
         wb = load_workbook(EXCEL_FILE)
         ws = wb.active
@@ -80,7 +100,7 @@ def update_reading(counter_name, date_str, value, record_time):
         col_idx = headers.index(counter_name) + 1
 
         for row in range(2, ws.max_row + 1):
-            if ws.cell(row, 1).value == date_str:
+            if ws.cell(row, 1).value == today:
                 ws.cell(row, col_idx).value = float(value)
                 ws.cell(row, 2).value = record_time
                 wb.save(EXCEL_FILE)
@@ -135,11 +155,6 @@ def get_counters_with_data():
     return list(counters_with_data)
 
 
-def get_future_dates(days=10):
-    today = datetime.now()
-    return [(today + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
-
-
 async def counters_keyboard():
     builder = InlineKeyboardBuilder()
 
@@ -150,62 +165,76 @@ async def counters_keyboard():
     if len(COUNTERS) > 20:
         builder.button(text="📋 Ещё", callback_data="more_cnt")
 
-    builder.button(text="📊 Статистика", callback_data="total_stats")
-    builder.button(text="📋 Счётчики с данными", callback_data="counters_with_data")
-    builder.button(text="📁 Скачать Excel", callback_data="download_file")
     builder.button(text="❌ Отмена", callback_data="cancel")
     builder.adjust(1)
-    return builder.as_markup()
-
-
-def date_keyboard(dates):
-    builder = InlineKeyboardBuilder()
-    for date in dates:
-        date_obj = datetime.strptime(date, "%Y-%m-%d")
-        display_date = date_obj.strftime("%d.%m.%Y")
-        builder.button(text=display_date, callback_data=f"dt_{date}")
-    builder.button(text="❌ Отмена", callback_data="cancel")
-    builder.adjust(2)
     return builder.as_markup()
 
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
     init_excel()
+    ensure_today_exists()
     data = get_all_data()
     counters_with_data = get_counters_with_data()
 
+    today = datetime.now().strftime("%d.%m.%Y")
+
     text = (
-        "🏭 ЭНЕРГОУЧЁТ\n\n"
-        f"📊 Статистика:\n"
-        f"   Записей: {len(data)}\n"
-        f"   Счётчиков всего: {len(COUNTERS)}\n"
-        f"   Счётчиков с данными: {len(counters_with_data)}\n\n"
-        "📌 Команды:\n"
-        "   /add - Ввести показания\n"
-        "   /stats - Статистика\n"
-        "   /counters - Все счётчики\n"
-        "   /data_counters - Счётчики с данными\n"
-        "   /file - Скачать Excel\n"
-        "   /help - Помощь\n\n"
-        f"📅 Доступны даты: следующие 10 дней\n"
-        f"⏰ Время записи: фиксируется автоматически"
+        f"🏭 ЭНЕРГОУЧЁТ\n\n"
+        f"📅 Сегодня: {today}\n"
+        f"📊 Записей всего: {len(data)}\n"
+        f"🏭 Счётчиков: {len(COUNTERS)}\n"
+        f"✅ Счётчиков с данными: {len(counters_with_data)}\n\n"
+        f"💡 Нажмите кнопку '📝 Ввести показания'\n"
+        f"   или используйте команды:"
     )
 
-    await message.answer(text)
+    await message.answer(text, reply_markup=get_main_menu())
+
+
+@dp.message(F.text == "📊 Статистика")
+async def stats_button(message: types.Message):
+    await show_stats(message)
+
+
+@dp.message(F.text == "📝 Ввести показания")
+async def add_button(message: types.Message, state: FSMContext):
+    await message.answer("Выберите счётчик:", reply_markup=await counters_keyboard())
+    await state.set_state(EnergyForm.choosing_counter)
+
+
+@dp.message(F.text == "📋 Все счётчики")
+async def all_counters_button(message: types.Message):
+    await show_all_counters(message)
+
+
+@dp.message(F.text == "✅ Счётчики с данными")
+async def counters_with_data_button(message: types.Message):
+    await show_counters_with_data(message)
+
+
+@dp.message(F.text == "📁 Скачать Excel")
+async def file_button(message: types.Message):
+    await send_excel_file(message)
+
+
+@dp.message(F.text == "❓ Помощь")
+async def help_button(message: types.Message):
+    await help_command(message)
 
 
 @dp.message(Command("help"))
 async def help_command(message: types.Message):
     await message.answer(
         "ИНСТРУКЦИЯ\n\n"
-        "/add - выбрать счётчик → дату → ввести показание\n"
-        "/stats - общая статистика\n"
-        "/counters - список всех счётчиков\n"
-        "/data_counters - счётчики с показаниями\n"
-        "/file - скачать Excel файл\n\n"
-        "Даты: сегодня + следующие 9 дней\n"
-        "Время записи сохраняется автоматически"
+        "📝 Ввести показания:\n"
+        "   1. Нажмите кнопку '📝 Ввести показания'\n"
+        "   2. Выберите счётчик из списка\n"
+        "   3. Введите показание (число в кВт·ч)\n\n"
+        "📊 Статистика - показывает общее потребление\n"
+        "📁 Скачать Excel - получить файл с данными\n\n"
+        f"📅 Все показания записываются на сегодняшнюю дату: {datetime.now().strftime('%d.%m.%Y')}",
+        reply_markup=get_main_menu()
     )
 
 
@@ -219,7 +248,7 @@ async def show_all_counters(message: types.Message):
             text = ""
 
     if text:
-        await message.answer(text)
+        await message.answer(text, reply_markup=get_main_menu())
 
 
 @dp.message(Command("data_counters"))
@@ -227,18 +256,14 @@ async def show_counters_with_data(message: types.Message):
     counters_with_data = get_counters_with_data()
 
     if not counters_with_data:
-        await message.answer("Нет счётчиков с данными. Добавьте показания через /add")
+        await message.answer("Нет счётчиков с данными", reply_markup=get_main_menu())
         return
 
     text = "СЧЁТЧИКИ С ПОКАЗАНИЯМИ:\n\n"
     for i, c in enumerate(counters_with_data, 1):
         text += f"{i}. {c}\n"
-        if len(text) > 3500:
-            await message.answer(text)
-            text = ""
 
-    if text:
-        await message.answer(text)
+    await message.answer(text, reply_markup=get_main_menu())
 
 
 @dp.message(Command("file"))
@@ -251,9 +276,9 @@ async def send_excel_file(message: types.Message):
                 caption=f"Файл учёта энергоресурсов\n{datetime.now().strftime('%d.%m.%Y %H:%M')}"
             )
         except Exception as e:
-            await message.answer(f"Ошибка при отправке файла: {e}")
+            await message.answer(f"Ошибка: {e}")
     else:
-        await message.answer("Файл ещё не создан. Добавьте первые показания через /add")
+        await message.answer("Файл ещё не создан")
 
 
 @dp.message(Command("add"))
@@ -267,22 +292,24 @@ async def show_stats(message: types.Message):
     data = get_all_data()
 
     if not data:
-        await message.answer("Нет данных. Добавьте через /add")
+        await message.answer("Нет данных. Введите показания через кнопку '📝 Ввести показания'",
+                             reply_markup=get_main_menu())
         return
 
     text = "СТАТИСТИКА ПОТРЕБЛЕНИЯ\n\n"
     total_all = 0
 
+    # Показываем последние 10 дней (или все, если меньше)
     for day in data[-10:]:
         text += f"📅 {day['date']}\n"
         if day.get('time'):
-            text += f"   Время: {day['time']}\n"
-        text += f"   Сумма: {day['total']:,.2f} кВт·ч\n"
-        text += f"   Счётчиков: {len(day['counters'])}\n\n"
+            text += f"   🕐 Время: {day['time'][11:16] if len(day['time']) > 11 else day['time']}\n"
+        text += f"   ⚡ Сумма: {day['total']:,.2f} кВт·ч\n"
+        text += f"   📊 Счётчиков: {len(day['counters'])}\n\n"
         total_all += day['total']
 
-    text += f"ИТОГО: {total_all:,.2f} кВт·ч"
-    await message.answer(text)
+    text += f"💰 ИТОГО за всё время: {total_all:,.2f} кВт·ч"
+    await message.answer(text, reply_markup=get_main_menu())
 
 
 @dp.callback_query(F.data == "more_cnt")
@@ -307,39 +334,6 @@ async def back_main(callback: types.CallbackQuery):
     await callback.answer()
 
 
-@dp.callback_query(F.data == "counters_with_data")
-async def counters_with_data_callback(callback: types.CallbackQuery):
-    counters_with_data = get_counters_with_data()
-
-    if not counters_with_data:
-        await callback.message.edit_text("Нет счётчиков с данными")
-        await callback.answer()
-        return
-
-    text = "СЧЁТЧИКИ С ПОКАЗАНИЯМИ:\n\n"
-    for i, c in enumerate(counters_with_data, 1):
-        text += f"{i}. {c}\n"
-
-    await callback.message.edit_text(text)
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "download_file")
-async def download_file_callback(callback: types.CallbackQuery):
-    if os.path.exists(EXCEL_FILE):
-        try:
-            document = FSInputFile(EXCEL_FILE)
-            await callback.message.answer_document(
-                document=document,
-                caption=f"Файл учёта энергоресурсов\n{datetime.now().strftime('%d.%m.%Y %H:%M')}"
-            )
-        except Exception as e:
-            await callback.message.answer(f"Ошибка: {e}")
-    else:
-        await callback.message.answer("Файл ещё не создан")
-    await callback.answer()
-
-
 @dp.callback_query(F.data.startswith("cnt_"))
 async def counter_selected(callback: types.CallbackQuery, state: FSMContext):
     idx = int(callback.data.split("_")[1])
@@ -351,31 +345,13 @@ async def counter_selected(callback: types.CallbackQuery, state: FSMContext):
     selected = COUNTERS[idx]
     await state.update_data(selected_counter=selected)
 
-    future_dates = get_future_dates(10)
+    today = datetime.now().strftime("%d.%m.%Y")
 
     await callback.message.edit_text(
-        f"Выбран счётчик: {selected}\n\nВыберите дату (доступны следующие 10 дней):",
-        reply_markup=date_keyboard(future_dates)
-    )
-    await state.set_state(EnergyForm.choosing_date)
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("dt_"))
-async def date_selected(callback: types.CallbackQuery, state: FSMContext):
-    date_str = callback.data.replace("dt_", "")
-    await state.update_data(selected_date=date_str)
-
-    data = await state.get_data()
-    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-    display_date = date_obj.strftime("%d.%m.%Y")
-
-    await callback.message.edit_text(
-        f"Введите показание\n\n"
-        f"Счётчик: {data['selected_counter']}\n"
-        f"Дата: {display_date}\n"
-        f"Время записи: {datetime.now().strftime('%H:%M:%S')}\n\n"
-        f"Введите значение в кВт·ч:"
+        f"✅ Выбран счётчик: {selected}\n\n"
+        f"📅 Дата записи: {today} (сегодня)\n"
+        f"⏰ Время будет записано автоматически\n\n"
+        f"✏️ Введите показание в кВт·ч:"
     )
     await state.set_state(EnergyForm.entering_value)
     await callback.answer()
@@ -391,56 +367,33 @@ async def value_entered(message: types.Message, state: FSMContext):
 
         data = await state.get_data()
         counter = data['selected_counter']
-        date = data['selected_date']
         record_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        today = datetime.now().strftime("%d.%m.%Y")
 
-        if update_reading(counter, date, value, record_time):
-            date_obj = datetime.strptime(date, "%Y-%m-%d")
-            display_date = date_obj.strftime("%d.%m.%Y")
-
+        if update_reading(counter, value, record_time):
             await message.answer(
                 f"✅ Показания сохранены!\n\n"
-                f"Счётчик: {counter}\n"
-                f"Дата: {display_date}\n"
-                f"Значение: {value:,.2f} кВт·ч\n"
-                f"Время записи: {record_time}\n\n"
-                f"/stats - статистика\n"
-                f"/data_counters - счётчики с данными\n"
-                f"/file - скачать Excel"
+                f"🏭 Счётчик: {counter}\n"
+                f"📅 Дата: {today}\n"
+                f"⚡ Значение: {value:,.2f} кВт·ч\n"
+                f"⏰ Время: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                f"📊 /stats - статистика\n"
+                f"📁 /file - скачать Excel",
+                reply_markup=get_main_menu()
             )
         else:
-            await message.answer("Ошибка при сохранении!")
+            await message.answer("❌ Ошибка при сохранении!", reply_markup=get_main_menu())
 
         await state.clear()
 
     except ValueError:
-        await message.answer("Введите число (например: 125.5)")
-
-
-@dp.callback_query(F.data == "total_stats")
-async def total_stats_callback(callback: types.CallbackQuery):
-    data = get_all_data()
-
-    if not data:
-        await callback.message.edit_text("Нет данных. /add - добавить")
-        await callback.answer()
-        return
-
-    text = "ОБЩАЯ СТАТИСТИКА\n\n"
-    total = sum(d['total'] for d in data)
-
-    for day in data[:15]:
-        text += f"{day['date']}: {day['total']:,.2f} кВт·ч\n"
-
-    text += f"\nВсего: {total:,.2f} кВт·ч"
-    await callback.message.edit_text(text)
-    await callback.answer()
+        await message.answer("❌ Введите число (например: 125.5)")
 
 
 @dp.callback_query(F.data == "cancel")
 async def cancel_action(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("Отменено")
+    await callback.message.edit_text("❌ Отменено", reply_markup=get_main_menu())
     await callback.answer()
 
 
@@ -448,8 +401,10 @@ async def main():
     print("Бот Энергоучёт запущен!")
     print(f"Файл: {EXCEL_FILE}")
     print(f"Счётчиков: {len(COUNTERS)}")
+    print("Дата для записи: ТОЛЬКО ТЕКУЩАЯ")
 
     init_excel()
+    ensure_today_exists()
     await dp.start_polling(bot)
 
 
