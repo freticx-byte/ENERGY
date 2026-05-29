@@ -12,7 +12,7 @@ from aiogram.types import FSInputFile, ReplyKeyboardMarkup, KeyboardButton
 from openpyxl import Workbook, load_workbook
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-bot = Bot(token="8294835663:AAE9Xyhm3zoCewEmBNTbM4b9w3sMIFT05ao")
+bot = Bot(token="8976307638:AAEyUMxOzc5Wy7JSHThXxPV_v1bbazZRSYQ")
 dp = Dispatcher()
 
 EXCEL_FILE = "Ж учета энергоресурсов.xlsx"
