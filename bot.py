@@ -10,23 +10,21 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.types import FSInputFile, ReplyKeyboardMarkup, KeyboardButton
 from openpyxl import Workbook, load_workbook
-import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-bot = Bot(token="8976307638:AAEyUMxOzc5Wy7JSHThXxPV_v1bbazZRSYQ")
+bot = Bot(token="8294835663:AAE9Xyhm3zoCewEmBNTbM4b9w3sMIFT05ao")
 dp = Dispatcher()
 
 EXCEL_FILE = "Ж учета энергоресурсов.xlsx"
 
-# НАСТРОЙКИ EMAIL
 # НАСТРОЙКИ EMAIL (Gmail -> Яндекс)
-EMAIL_TO = "a.misyunas@uvelka.ru"  # Яндекc
-EMAIL_FROM = "uvenergorusursy@gmail.com"  # Gmail
-EMAIL_PASSWORD = "bmdt pzqh qdme wgnc"  # Пароль приложения Gmail
+EMAIL_TO = "freticx@yandex.ru"
+EMAIL_FROM = "uvenergorusursy@gmail.com"
+EMAIL_PASSWORD = "bmdt pzqh qdme wgnc"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
 
-# ГРУППЫ СЧЁТЧИКОВ (объединяем по объектам)
+# ГРУППЫ СЧЁТЧИКОВ (обновлено)
 COUNTER_GROUPS = {
     "ЦРП (Вводы и ТП)": [
         "ЦРП В1", "ЦРП В2", "ЦРП ТП1, СШ1", "ЦРП ТП1, СШ2",
@@ -46,10 +44,17 @@ COUNTER_GROUPS = {
         "ТП3 Лузговая В1", "ТП3 Лузговая В2",
         "ТП3 Элеваторный В1", "ТП3 Элеваторный В2"
     ],
-    "Прочие ТП и объекты": [
-        "ТП Луговская", "ТП-4 СТЗ",
-        "Насосная В1", "Насосная В2", "ЛОС В1", "ЛОС В2",
-        "КНС В1", "КНС В2", "Склад газации", "Теплосети ИТП",
+    "ТП4, ТП5, ТП6, ТП7": [
+        "ТП4 Элеватор В1", "ТП4 Элеватор В2",
+        "ТП5 ССиТ В1", "ТП5 ССиТ В2",
+        "ТП6 ГЦ В1", "ТП6 ГЦ В2",
+        "ТП7 СТЗ В1"
+    ],
+    "КТПН и прочие": [
+        "КТПН ГПУ Вход", "КТПН ГПУ Выход",
+        "ТП Луговская", "Насосная В1", "Насосная В2",
+        "ЛОС В1", "ЛОС В2", "КНС В1", "КНС В2",
+        "Склад газации", "Теплосети ИТП",
         "Газовая котельная №1", "Газовая котельная №2", "Временно ТП-3"
     ]
 }
@@ -84,7 +89,7 @@ async def send_email_report():
     """Отправляет Excel файл на email"""
     if not os.path.exists(EXCEL_FILE):
         print("Файл не найден для отправки")
-        return
+        return False
 
     try:
         msg = EmailMessage()
@@ -220,7 +225,7 @@ async def counters_keyboard(group_name):
     """Клавиатура выбора счётчика из конкретной группы"""
     builder = InlineKeyboardBuilder()
     counters = COUNTER_GROUPS.get(group_name, [])
-    for i, counter in enumerate(counters):
+    for counter in counters:
         text = counter[:35] if len(counter) > 35 else counter
         builder.button(text=text, callback_data=f"cnt_{counter}")
     builder.button(text="🔙 Назад к группам", callback_data="back_to_groups")
@@ -263,7 +268,7 @@ async def group_selected(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(selected_group=group_name)
 
     await callback.message.edit_text(
-        f"Выбрана группа: {group_name}\n\nВыберите счётчик:",
+        f"📁 Выбрана группа: {group_name}\n\n👇 Выберите счётчик:",
         reply_markup=await counters_keyboard(group_name)
     )
     await state.set_state(EnergyForm.choosing_counter)
@@ -272,7 +277,7 @@ async def group_selected(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "back_to_groups")
 async def back_to_groups(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Выберите группу счётчиков:")
+    await callback.message.edit_text("📁 Выберите группу счётчиков:")
     await callback.message.answer("Группы:", reply_markup=await groups_keyboard())
     await state.set_state(EnergyForm.choosing_group)
     await callback.answer()
@@ -299,7 +304,7 @@ async def value_entered(message: types.Message, state: FSMContext):
     try:
         value = float(message.text.replace(",", "."))
         if value < 0:
-            await message.answer("Введите положительное число")
+            await message.answer("❌ Введите положительное число")
             return
 
         data = await state.get_data()
@@ -331,10 +336,10 @@ async def value_entered(message: types.Message, state: FSMContext):
 async def show_stats(message: types.Message):
     data = get_all_data()
     if not data:
-        await message.answer("Нет данных. Введите показания через '📝 Ввести показания'", reply_markup=get_main_menu())
+        await message.answer("📊 Нет данных. Введите показания через '📝 Ввести показания'", reply_markup=get_main_menu())
         return
 
-    text = "СТАТИСТИКА ПОТРЕБЛЕНИЯ\n\n"
+    text = "📊 СТАТИСТИКА ПОТРЕБЛЕНИЯ\n\n"
     total_all = 0
     for day in data[-10:]:
         text += f"📅 {day['date']}\n"
@@ -343,14 +348,14 @@ async def show_stats(message: types.Message):
         text += f"   ⚡ Сумма: {day['total']:,.2f} кВт·ч\n\n"
         total_all += day['total']
 
-    text += f"💰 ИТОГО: {total_all:,.2f} кВт·ч"
+    text += f"💰 ИТОГО ЗА ВСЁ ВРЕМЯ: {total_all:,.2f} кВт·ч"
     await message.answer(text, reply_markup=get_main_menu())
 
 
 @dp.message(F.text == "📋 Все счётчики")
 @dp.message(Command("counters"))
 async def show_all_counters(message: types.Message):
-    text = "ВСЕ СЧЁТЧИКИ ПО ГРУППАМ:\n\n"
+    text = "📋 ВСЕ СЧЁТЧИКИ ПО ГРУППАМ:\n\n"
     for group, counters in COUNTER_GROUPS.items():
         text += f"📁 {group}:\n"
         for i, c in enumerate(counters, 1):
@@ -368,10 +373,10 @@ async def show_all_counters(message: types.Message):
 async def show_counters_with_data(message: types.Message):
     counters_with_data = get_counters_with_data()
     if not counters_with_data:
-        await message.answer("Нет счётчиков с данными", reply_markup=get_main_menu())
+        await message.answer("✅ Нет счётчиков с данными", reply_markup=get_main_menu())
         return
 
-    text = "СЧЁТЧИКИ С ПОКАЗАНИЯМИ:\n\n"
+    text = "✅ СЧЁТЧИКИ С ПОКАЗАНИЯМИ:\n\n"
     for i, c in enumerate(counters_with_data, 1):
         text += f"{i}. {c}\n"
     await message.answer(text, reply_markup=get_main_menu())
@@ -385,12 +390,12 @@ async def send_excel_file(message: types.Message):
             document = FSInputFile(EXCEL_FILE)
             await message.answer_document(
                 document=document,
-                caption=f"Файл учёта энергоресурсов\n{datetime.now().strftime('%d.%m.%Y %H:%M')}"
+                caption=f"📊 Файл учёта энергоресурсов\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
             )
         except Exception as e:
-            await message.answer(f"Ошибка: {e}")
+            await message.answer(f"❌ Ошибка: {e}")
     else:
-        await message.answer("Файл ещё не создан")
+        await message.answer("❌ Файл ещё не создан")
 
 
 @dp.message(F.text == "❓ Помощь")
@@ -405,18 +410,19 @@ async def help_command(message: types.Message):
         "   4. Введите число (кВт·ч)\n\n"
         "📊 Статистика - общее потребление\n"
         "📁 Скачать Excel - получить файл\n\n"
-        "📅 Все показания записываются на сегодня",
+        "📅 Все показания записываются на СЕГОДНЯ",
         reply_markup=get_main_menu()
     )
 
+
 @dp.message(Command("send"))
 async def send_now(message: types.Message):
-    await message.answer("📧 Отправляю отчёт...")
+    await message.answer("📧 Отправляю отчёт на почту...")
     result = await send_email_report()
     if result:
-        await message.answer("✅ Отчёт отправлен!")
+        await message.answer("✅ Отчёт успешно отправлен!")
     else:
-        await message.answer("❌ Ошибка отправки")
+        await message.answer("❌ Ошибка при отправке. Проверьте настройки email.")
 
 
 @dp.callback_query(F.data == "cancel")
@@ -426,11 +432,13 @@ async def cancel_action(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Главное меню:", reply_markup=get_main_menu())
     await callback.answer()
 
+
 # ============ ЗАПУСК С ПЛАНИРОВЩИКОМ ============
 async def main():
-    print("Бот Энергоучёт запущен!")
-    print(f"Файл: {EXCEL_FILE}")
-    print(f"Счётчиков: {len(ALL_COUNTERS)}")
+    print("🚀 Бот Энергоучёт запущен!")
+    print(f"📁 Файл: {EXCEL_FILE}")
+    print(f"🏭 Счётчиков: {len(ALL_COUNTERS)}")
+    print("=" * 40)
 
     init_excel()
     ensure_today_exists()
@@ -439,9 +447,11 @@ async def main():
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
     scheduler.add_job(send_email_report, 'cron', day_of_week='mon', hour=12, minute=0)
     scheduler.start()
-    print("⏰ Планировщик запущен: отчёт каждые понедельник в 12:00 МСК")
+    print("⏰ Планировщик запущен: отчёт каждый понедельник в 12:00 МСК")
+    print("=" * 40)
 
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
