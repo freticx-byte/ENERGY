@@ -21,7 +21,7 @@ storage = MemoryStorage()
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=storage)
 
-EXCEL_FILE = "Ж учета энергоресурсов.xlsx"
+EXCEL_FILE = "Ж учета энергоресурсов.xlsx"EXCEL_FILE = "Energy_rep_ELE.xlsx"
 
 # ============ НАСТРОЙКИ EMAIL ============
 EMAIL_TO = "a.misyunas@uvelka.ru"
@@ -96,7 +96,7 @@ async def send_email_report():
         with open(EXCEL_FILE, 'rb') as f:
             msg.add_attachment(f.read(), maintype='application',
                                subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                               filename=f"energy_report_{datetime.now().strftime('%Y%m%d')}.xlsx")
+                               filename=f"Energy_rep_ELE_{datetime.now().strftime('%Y%m%d')}.xlsx")
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
             server.send_message(msg)
@@ -105,8 +105,7 @@ async def send_email_report():
     except Exception as e:
         print(f"Ошибка email: {e}")
         return False
-
-
+        
 # ============ РАБОТА С EXCEL ============
 def init_excel():
     if not os.path.exists(EXCEL_FILE):
@@ -387,7 +386,7 @@ async def show_counters_with_data(message: types.Message):
 async def send_excel_file(message: types.Message):
     if os.path.exists(EXCEL_FILE):
         doc = types.InputFile(EXCEL_FILE)
-        await message.answer_document(doc, caption=f"📊 Файл учёта\n{datetime.now().strftime('%d.%m.%Y %H:%M')}")
+        await message.answer_document(doc, caption=f"📊 Energy_rep_ELE\n{datetime.now().strftime('%d.%m.%Y %H:%M')}")
     else:
         await message.answer("❌ Файл не создан")
 
@@ -423,7 +422,7 @@ async def help_command(message: types.Message):
         "• Отчёт на email: каждый понедельник в 12:00\n\n"
         "📌 *ВСЕГО СЧЁТЧИКОВ:* 53\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "📁 Скачать файл: /file\n"
+        "📁 Скачать файл: /file (Energy_rep_ELE.xlsx)"\n"
         "📧 Проверить email: /test_email"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_menu())
