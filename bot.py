@@ -422,7 +422,7 @@ async def help_command(message: types.Message):
         "• Отчёт на email: каждый понедельник в 12:00\n\n"
         "📌 *ВСЕГО СЧЁТЧИКОВ:* 53\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "📁 Скачать файл: /file (Energy_rep_ELE.xlsx)"\n"
+        "📁 Скачать файл: /file (Energy_rep_ELE.xlsx)\n"
         "📧 Проверить email: /test_email"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_menu())
