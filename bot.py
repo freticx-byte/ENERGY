@@ -4,16 +4,19 @@ import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters.command import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.dispatcher.filters import Command
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram import executor
+
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.types import FSInputFile, KeyboardButton
 from openpyxl import Workbook, load_workbook
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # ============ ТОКЕН БОТА ============
-TOKEN = "8294835663:AAE9Xyhm3zoCewEmBNTbM4b9w3sMIFT05ao"
+TOKEN = "8976307638:AAEyUMxOzc5Wy7JSHThXxPV_v1bbazZRSYQ"
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
@@ -558,4 +561,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True)
