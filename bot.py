@@ -82,7 +82,7 @@ def get_main_menu():
     return keyboard
 
 
-# ============ ФУНКЦИИ EMAIL ============
+# ============ ФУНКЦИИ EMAIL =============
 async def send_email_report():
     if not os.path.exists(EXCEL_FILE):
         print("Файл не найден")
