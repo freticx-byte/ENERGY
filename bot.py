@@ -21,7 +21,7 @@ storage = MemoryStorage()
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=storage)
 
-EXCEL_FILE = "Ж учета энергоресурсов.xlsx"EXCEL_FILE = "Energy_rep_ELE.xlsx"
+EXCEL_FILE = "Energy_rep_ELE.xlsx"
 
 # ============ НАСТРОЙКИ EMAIL ============
 EMAIL_TO = "a.misyunas@uvelka.ru"
