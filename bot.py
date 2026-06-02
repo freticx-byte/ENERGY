@@ -239,22 +239,6 @@ async def start(message: types.Message):
     await message.answer(text, reply_markup=get_main_menu())
 
 
-@dp.message_handler(commands=["help"])
-async def help_command(message: types.Message):
-    await message.answer(
-        "📘 ИНСТРУКЦИЯ\n\n"
-        "/start - Запустить бота\n"
-        "/add - Ввести показания\n"
-        "/stats - Статистика\n"
-        "/counters - Все счётчики\n"
-        "/data_counters - Счётчики с данными\n"
-        "/file - Скачать Excel\n"
-        "/test_email - Проверить email\n\n"
-        "Все показания записываются на СЕГОДНЯ",
-        reply_markup=get_main_menu()
-    )
-
-
 @dp.message_handler(commands=["test_email"])
 async def test_email(message: types.Message):
     await message.answer("📧 Отправляю...")
@@ -263,6 +247,34 @@ async def test_email(message: types.Message):
         await message.answer("✅ Письмо отправлено!")
     else:
         await message.answer("❌ Ошибка")
+
+
+@dp.message_handler(commands=["update"])
+async def update_counters(message: types.Message):
+    """Обновляет список счётчиков в Excel файле"""
+    try:
+        wb = load_workbook(EXCEL_FILE)
+        ws = wb.active
+        current_headers = [str(cell.value) if cell.value else "" for cell in ws[1]]
+        
+        new_counters = []
+        for counter in ALL_COUNTERS:
+            if counter not in current_headers:
+                new_counters.append(counter)
+        
+        if new_counters:
+            for counter in new_counters:
+                ws.cell(1, ws.max_column + 1, value=counter)
+            for row in range(2, ws.max_row + 1):
+                for col in range(len(current_headers) + 1, ws.max_column + 1):
+                    ws.cell(row, col, value=0)
+            wb.save(EXCEL_FILE)
+            await message.answer(f"✅ Добавлено {len(new_counters)} новых счётчиков")
+        else:
+            await message.answer("✅ Все счётчики уже есть")
+        wb.close()
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
 
 
 @dp.message_handler(lambda message: message.text == "📝 Ввести показания")
@@ -356,6 +368,30 @@ async def show_all_counters(message: types.Message):
         text += "\n"
     await message.answer(text, reply_markup=get_main_menu())
 
+
+@dp.message_handler(lambda message: message.text == "✅ Счётчики с данными")
+@dp.message_handler(commands=["data_counters"])
+async def show_counters_with_data(message: types.Message):
+    counters = get_counters_with_data()
+    if not counters:
+        await message.answer("✅ Нет данных", reply_markup=get_main_menu())
+        return
+    text = "✅ СЧЁТЧИКИ С ДАННЫМИ:\n\n"
+    for i, c in enumerate(counters, 1):
+        text += f"{i}. {c}\n"
+    await message.answer(text, reply_markup=get_main_menu())
+
+
+@dp.message_handler(lambda message: message.text == "📁 Скачать Excel")
+@dp.message_handler(commands=["file"])
+async def send_excel_file(message: types.Message):
+    if os.path.exists(EXCEL_FILE):
+        doc = types.InputFile(EXCEL_FILE)
+        await message.answer_document(doc, caption=f"📊 Файл учёта\n{datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    else:
+        await message.answer("❌ Файл не создан")
+
+
 @dp.message_handler(lambda message: message.text == "❓ Помощь")
 @dp.message_handler(commands=["help"])
 async def help_command(message: types.Message):
@@ -391,29 +427,6 @@ async def help_command(message: types.Message):
         "📧 Проверить email: /test_email"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_menu())
-
-
-@dp.message_handler(lambda message: message.text == "✅ Счётчики с данными")
-@dp.message_handler(commands=["data_counters"])
-async def show_counters_with_data(message: types.Message):
-    counters = get_counters_with_data()
-    if not counters:
-        await message.answer("✅ Нет данных", reply_markup=get_main_menu())
-        return
-    text = "✅ СЧЁТЧИКИ С ДАННЫМИ:\n\n"
-    for i, c in enumerate(counters, 1):
-        text += f"{i}. {c}\n"
-    await message.answer(text, reply_markup=get_main_menu())
-
-
-@dp.message_handler(lambda message: message.text == "📁 Скачать Excel")
-@dp.message_handler(commands=["file"])
-async def send_excel_file(message: types.Message):
-    if os.path.exists(EXCEL_FILE):
-        doc = types.InputFile(EXCEL_FILE)
-        await message.answer_document(doc, caption=f"📊 Файл учёта\n{datetime.now().strftime('%d.%m.%Y %H:%M')}")
-    else:
-        await message.answer("❌ Файл не создан")
 
 
 @dp.callback_query_handler(lambda c: c.data == "cancel", state="*")
