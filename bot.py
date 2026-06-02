@@ -13,7 +13,7 @@ from aiogram.utils import executor
 from openpyxl import Workbook, load_workbook
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# ============ ТОКЕН БОТА ============
+# ============ ТОКЕН БОТА =============
 TOKEN = "8976307638:AAEyUMxOzc5Wy7JSHThXxPV_v1bbazZRSYQ"
 
 # ============ СОЗДАНИЕ БОТА ============
