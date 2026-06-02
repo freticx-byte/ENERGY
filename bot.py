@@ -8,23 +8,48 @@ from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from aiogram.types import FSInputFile, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import FSInputFile, KeyboardButton
 from openpyxl import Workbook, load_workbook
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-bot = Bot(token="8976307638:AAEyUMxOzc5Wy7JSHThXxPV_v1bbazZRSYQ")
+# ============ ТОКЕН БОТА ============
+TOKEN = "8294835663:AAE9Xyhm3zoCewEmBNTbM4b9w3sMIFT05ao"
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 EXCEL_FILE = "Ж учета энергоресурсов.xlsx"
 
-# НАСТРОЙКИ EMAIL (Gmail -> Яндекс)
-EMAIL_TO = "freticx@yandex.ru"
+# ============ НАСТРОЙКИ EMAIL ============
+EMAIL_TO = "a.misyunas@uvelka.ru"  # ← ИСПРАВЛЕНО
 EMAIL_FROM = "uvenergorusursy@gmail.com"
 EMAIL_PASSWORD = "bmdt pzqh qdme wgnc"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
 
-# ГРУППЫ СЧЁТЧИКОВ (обновлено)
+# ============ ВСЕ СЧЁТЧИКИ (45 штук) ============
+ALL_COUNTERS = [
+    "ЦРП В1", "ЦРП В2", "ЦРП ТП1, СШ1", "ЦРП ТП1, СШ2",
+    "ЦРП ТП2, СШ1", "ЦРП ТП2, СШ2", "ЦРП ТП3, СШ1", "ЦРП ТП3, СШ2",
+    'ЦРП КСО "Радуга"',
+    "ТП1 ГРЩ. ППУ В1", "ТП1 ГРЩ. ППУ В2",
+    "ТП1 РУ0,4 СГП В1", "ТП1 РУ0,4 СГП В2",
+    "ТП2 ГРЩ В1", "ТП2 ГРЩ В2",
+    "ТП2 РУ0,4 В1", "ТП2 РУ0,4 В2",
+    "ТП3 РУ0,4 Элеватор В1", "ТП3 РУ0,4 Элеватор В2",
+    "ТП3 Лузговая В1", "ТП3 Лузговая В2",
+    "ТП3 Элеваторный В1", "ТП3 Элеваторный В2",
+    "ТП4 Элеватор В1", "ТП4 Элеватор В2",
+    "ТП5 ССиТ В1", "ТП5 ССиТ В2",
+    "ТП6 ГЦ В1", "ТП6 ГЦ В2",
+    "ТП7 СТЗ В1",
+    "КТПН ГПУ Вход", "КТПН ГПУ Выход",
+    "ТП Луговская", "Насосная В1", "Насосная В2",
+    "ЛОС В1", "ЛОС В2", "КНС В1", "КНС В2",
+    "Склад газации", "Теплосети ИТП",
+    "Газовая котельная №1", "Газовая котельная №2", "Временно ТП-3"
+]
+
+# ============ ГРУППЫ СЧЁТЧИКОВ ============
 COUNTER_GROUPS = {
     "ЦРП (Вводы и ТП)": [
         "ЦРП В1", "ЦРП В2", "ЦРП ТП1, СШ1", "ЦРП ТП1, СШ2",
@@ -58,11 +83,6 @@ COUNTER_GROUPS = {
         "Газовая котельная №1", "Газовая котельная №2", "Временно ТП-3"
     ]
 }
-
-# Плоский список для обратной совместимости
-ALL_COUNTERS = []
-for group in COUNTER_GROUPS.values():
-    ALL_COUNTERS.extend(group)
 
 
 class EnergyForm(StatesGroup):
@@ -122,6 +142,27 @@ def init_excel():
         ws = wb.active
         ws.append(["Дата", "Время записи"] + ALL_COUNTERS)
         wb.save(EXCEL_FILE)
+        print(f"✅ Создан новый файл с {len(ALL_COUNTERS)} счётчиками")
+    else:
+        # Проверяем и добавляем недостающие колонки
+        wb = load_workbook(EXCEL_FILE)
+        ws = wb.active
+        headers = [str(cell.value) if cell.value else "" for cell in ws[1]]
+        
+        added = 0
+        for counter in ALL_COUNTERS:
+            if counter not in headers:
+                ws.cell(1, ws.max_column + 1, value=counter)
+                added += 1
+        
+        if added > 0:
+            # Заполняем нулями существующие строки
+            for row in range(2, ws.max_row + 1):
+                for col in range(len(headers) + 1, ws.max_column + 1):
+                    ws.cell(row, col, value=0)
+            wb.save(EXCEL_FILE)
+            print(f"✅ Добавлено {added} новых счётчиков")
+        wb.close()
 
 
 def get_today_str():
@@ -212,7 +253,6 @@ def get_counters_with_data():
 
 # ============ КЛАВИАТУРЫ ============
 async def groups_keyboard():
-    """Клавиатура выбора группы счётчиков"""
     builder = InlineKeyboardBuilder()
     for group_name in COUNTER_GROUPS.keys():
         builder.button(text=group_name, callback_data=f"group_{group_name}")
@@ -222,7 +262,6 @@ async def groups_keyboard():
 
 
 async def counters_keyboard(group_name):
-    """Клавиатура выбора счётчика из конкретной группы"""
     builder = InlineKeyboardBuilder()
     counters = COUNTER_GROUPS.get(group_name, [])
     for counter in counters:
@@ -256,9 +295,98 @@ async def start(message: types.Message):
     await message.answer(text, reply_markup=get_main_menu())
 
 
+@dp.message(Command("help"))
+async def help_command(message: types.Message):
+    await message.answer(
+        "📘 *ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ*\n\n"
+        "📌 *ОСНОВНЫЕ КОМАНДЫ:*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "📝 `/add` - Ввести показания счётчика\n"
+        "📊 `/stats` - Показать статистику потребления\n"
+        "📋 `/counters` - Список всех счётчиков\n"
+        "✅ `/data_counters` - Счётчики с показаниями\n"
+        "📁 `/file` - Скачать Excel файл\n"
+        "🔄 `/update` - Обновить список счётчиков\n"
+        "📧 `/test_email` - Проверить отправку email\n"
+        "❓ `/help` - Эта инструкция\n\n"
+        "📌 *КАК ВВЕСТИ ПОКАЗАНИЯ:*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "1️⃣ Нажмите кнопку '📝 Ввести показания'\n"
+        "2️⃣ Выберите группу счётчиков\n"
+        "3️⃣ Выберите конкретный счётчик\n"
+        "4️⃣ Введите показание в кВт·ч\n\n"
+        "📌 *ГРУППЫ СЧЁТЧИКОВ:*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "• ЦРП (Вводы и ТП) - 9 счётчиков\n"
+        "• ТП1 (ГРЩ и СГП) - 6 счётчиков\n"
+        "• ТП2 (ГРЩ и цеха) - 6 счётчиков\n"
+        "• ТП3 (Элеватор, котельная) - 8 счётчиков\n"
+        "• ТП4, ТП5, ТП6, ТП7 - 9 счётчиков\n"
+        "• КТПН и прочие - 15 счётчиков\n\n"
+        "📌 *СТАТИСТИКА:*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "• Всего счётчиков: 53\n"
+        "• Все показания записываются на СЕГОДНЯ\n"
+        "• Время записи фиксируется автоматически\n"
+        "• Отчёт на email: каждый понедельник в 12:00\n\n"
+        "📌 *ПОЛЕЗНЫЕ ССЫЛКИ:*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "• Скачать Excel файл: /file\n"
+        "• Проверить email: /test_email\n"
+        "• Обновить счётчики: /update",
+        parse_mode="Markdown",
+        reply_markup=get_main_menu()
+    )
+
+
+@dp.message(Command("update"))
+async def update_counters(message: types.Message):
+    """Добавляет новые колонки в Excel файл"""
+    try:
+        wb = load_workbook(EXCEL_FILE)
+        ws = wb.active
+        
+        current_headers = [str(cell.value) if cell.value else "" for cell in ws[1]]
+        
+        new_counters = []
+        for counter in ALL_COUNTERS:
+            if counter not in current_headers:
+                new_counters.append(counter)
+        
+        if new_counters:
+            for counter in new_counters:
+                ws.cell(1, ws.max_column + 1, value=counter)
+            
+            for row in range(2, ws.max_row + 1):
+                for col in range(len(current_headers) + 1, ws.max_column + 1):
+                    ws.cell(row, col, value=0)
+            
+            wb.save(EXCEL_FILE)
+            await message.answer(f"✅ Добавлено {len(new_counters)} новых счётчиков:\n" + "\n".join(new_counters[:10]))
+        else:
+            await message.answer("✅ Все счётчики уже есть в таблице")
+        
+        wb.close()
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
+
+@dp.message(Command("test_email"))
+async def test_email(message: types.Message):
+    await message.answer("📧 Отправляю тестовое письмо...")
+    result = await send_email_report()
+    if result:
+        await message.answer("✅ Письмо отправлено! Проверь почту.")
+    else:
+        await message.answer("❌ Ошибка. Проверь настройки:\n"
+                           f"Email отправителя: {EMAIL_FROM}\n"
+                           f"Email получателя: {EMAIL_TO}")
+
+
 @dp.message(F.text == "📝 Ввести показания")
+@dp.message(Command("add"))
 async def add_button(message: types.Message, state: FSMContext):
-    await message.answer("Выберите группу счётчиков:", reply_markup=await groups_keyboard())
+    await message.answer("📁 Выберите группу счётчиков:", reply_markup=await groups_keyboard())
     await state.set_state(EnergyForm.choosing_group)
 
 
@@ -330,7 +458,6 @@ async def value_entered(message: types.Message, state: FSMContext):
         await message.answer("❌ Введите число (например: 125.5)")
 
 
-# ============ СТАТИСТИКА И ПРОЧЕЕ ============
 @dp.message(F.text == "📊 Статистика")
 @dp.message(Command("stats"))
 async def show_stats(message: types.Message):
@@ -399,30 +526,8 @@ async def send_excel_file(message: types.Message):
 
 
 @dp.message(F.text == "❓ Помощь")
-@dp.message(Command("help"))
-async def help_command(message: types.Message):
-    await message.answer(
-        "📘 ИНСТРУКЦИЯ\n\n"
-        "📝 Ввести показания:\n"
-        "   1. Нажмите '📝 Ввести показания'\n"
-        "   2. Выберите группу счётчиков\n"
-        "   3. Выберите счётчик\n"
-        "   4. Введите число (кВт·ч)\n\n"
-        "📊 Статистика - общее потребление\n"
-        "📁 Скачать Excel - получить файл\n\n"
-        "📅 Все показания записываются на СЕГОДНЯ",
-        reply_markup=get_main_menu()
-    )
-
-
-@dp.message(Command("send"))
-async def send_now(message: types.Message):
-    await message.answer("📧 Отправляю отчёт на почту...")
-    result = await send_email_report()
-    if result:
-        await message.answer("✅ Отчёт успешно отправлен!")
-    else:
-        await message.answer("❌ Ошибка при отправке. Проверьте настройки email.")
+async def help_button(message: types.Message):
+    await help_command(message)
 
 
 @dp.callback_query(F.data == "cancel")
@@ -433,22 +538,21 @@ async def cancel_action(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# ============ ЗАПУСК С ПЛАНИРОВЩИКОМ ============
+# ============ ЗАПУСК ============
 async def main():
     print("🚀 Бот Энергоучёт запущен!")
     print(f"📁 Файл: {EXCEL_FILE}")
     print(f"🏭 Счётчиков: {len(ALL_COUNTERS)}")
-    print("=" * 40)
-
+    print("========================================")
+    
     init_excel()
     ensure_today_exists()
 
-    # Планировщик: каждый понедельник в 12:00 МСК
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
     scheduler.add_job(send_email_report, 'cron', day_of_week='mon', hour=12, minute=0)
     scheduler.start()
     print("⏰ Планировщик запущен: отчёт каждый понедельник в 12:00 МСК")
-    print("=" * 40)
+    print("========================================")
 
     await dp.start_polling(bot)
 
