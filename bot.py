@@ -14,7 +14,7 @@ from openpyxl import Workbook, load_workbook
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # ============ ТОКЕН БОТА =============
-TOKEN = "8976307638:AAEyUMxOzc5Wy7JSHThXxPV_v1bbazZRSYQ"
+TOKEN = "8976307638:AAGZNiGdfhYeYTjWVvWS2g3bAFM5RiwLi1g"
 
 # ============ СОЗДАНИЕ БОТА ============
 storage = MemoryStorage()
