@@ -2,7 +2,7 @@ import asyncio
 import os
 import smtplib
 from email.message import EmailMessage
-from datetime import datetime, timedelta
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
@@ -19,8 +19,7 @@ storage = MemoryStorage()
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=storage)
 
-EXCEL_ELE_FILE = "Energy_rep_ELE.xlsx"
-EXCEL_RES_FILE = "Energy_rep_RES.xlsx"
+EXCEL_FILE = "Energy_rep_ELE.xlsx"
 
 EMAIL_TO = "a.misyunas@uvelka.ru"
 EMAIL_FROM = "uvenergorusursy@gmail.com"
@@ -28,14 +27,13 @@ EMAIL_PASSWORD = "bmdt pzqh qdme wgnc"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
 
-# ============ ИЕРАРХИЧЕСКОЕ МЕНЮ (ТОЛЬКО 2 УРОВНЯ) ============
-# Уровень 1: объект
-# Уровень 2: счётчик (сразу вводим показания)
-
-ELE_MENU = {
-    "ЦРП 10кВ": ["ЦРП В1", "ЦРП В2"],
-    "ТП1": ["ТП1 СГП В1", "ТП1 СГП В2", "ТП1 ППУ В1", "ТП1 ППУ В2"],
-    "ТП2": ["ТП2 Цэх1 В1", "ТП2 Цэх1 В2", "ТП2 ГРЩ В1", "ТП2 ГРЩ В2"],
+# ============ МЕНЮ (ТОЛЬКО 2 УРОВНЯ: ГРУППА → СЧЁТЧИК) ============
+MENU = {
+    "ЦРП 10кВ": ["ЦРП В1", "ЦРП В2", "ЦРП ТП1, СШ1", "ЦРП ТП1, СШ2",
+                 "ЦРП ТП2, СШ1", "ЦРП ТП2, СШ2", "ЦРП ТП3, СШ1", "ЦРП ТП3, СШ2",
+                 'ЦРП КСО "Радуга"'],
+    "ТП1": ["ТП1 ГРЩ. ППУ В1", "ТП1 ГРЩ. ППУ В2", "ТП1 СГП В1", "ТП1 СГП В2"],
+    "ТП2": ["ТП2 ГРЩ В1", "ТП2 ГРЩ В2", "ТП2 Цэх1 В1", "ТП2 Цэх1 В2"],
     "ТП3": [
         "ТП3 Элеватор В1", "ТП3 Элеватор В2",
         "ТП3 Лузговая В1", "ТП3 Лузговая В2",
@@ -55,61 +53,41 @@ ELE_MENU = {
         "КТПН ГПУ3 →", "КТПН ГПУ3 ←",
         "КТПН ГПУ4 →", "КТПН ГПУ4 ←"
     ],
-    "Радуга Склад": ["ШВ-6", "ШС-6", "ЩС Зар В1", "ЩС Зар В2"]
+    "Радуга Склад": ["ШВ-6", "ШС-6", "ЩС Зар В1", "ЩС Зар В2"],
+    "Теплосети": ["Теплосети ИТП"],
+    "Прочее": ["ТП Луговская", "Склад газации", "Временно ТП-3"]
 }
 
-RES_MENU = {
-    "Цех1": ["РП3"],
-    "Цех3": ["ВРУ-1 (ТП-304)", "ВРУ-1 (ТП-324)", "ВРУ-2 (ТП-304)", "ВРУ-2 (ТП-324)"],
-    "Цех4": ["ТЛ1 ШУ-3-1 ШУ6", "ТЛ2 ШУ-3-2 ШУ6", "ТЛ3 ШУ-3-1 ШУ5", "Нории14-23 ШУ5"],
-    "РМЦ": ["РМЦ", "Карный участок"],
-    "Компрессорная": [
-        "ПК3 ТП304 В1", "ПК3 ТП324 В2",
-        "ПК2 Компр.4", "ПК2 Компр.5", "ПК2 Компр.6",
-        "ПК1 Компр.7", "ПК1 Компр.8"
-    ],
-    "РХУ": ["Скл. бестарного хранения", "Хлопья Шулле"],
-    "Фасовка": ["Фасовка", "ЩВ фасовка"],
-    "ССиТ": ["ВРУ4 ТП304 В1", "ВРУ4 ТП324 В2"],
-    "Офис": ["Офис (Админ)"],
-    "Столовая": ["ШР столовая"],
-    "КГУ": ["Выработка КГУ"]
-}
-
-# Плоские списки счётчиков
-ALL_ELE_COUNTERS = []
-for counters in ELE_MENU.values():
-    ALL_ELE_COUNTERS.extend(counters)
-
-ALL_RES_COUNTERS = []
-for counters in RES_MENU.values():
-    ALL_RES_COUNTERS.extend(counters)
+# Плоский список всех счётчиков
+ALL_COUNTERS = []
+for counters in MENU.values():
+    ALL_COUNTERS.extend(counters)
 
 
 class EnergyForm(StatesGroup):
-    choosing_object = State()
     choosing_group = State()
     entering_value = State()
+    last_group = State()  # Запоминаем последнюю группу для возврата
 
 
 # ============ ФУНКЦИИ EXCEL ============
-def init_excel(file_path, counters):
-    if not os.path.exists(file_path):
+def init_excel():
+    if not os.path.exists(EXCEL_FILE):
         wb = Workbook()
         ws = wb.active
-        ws.append(["Дата", "Время записи"] + counters)
-        wb.save(file_path)
-        print(f"✅ Создан файл {file_path}")
+        ws.append(["Дата", "Время записи"] + ALL_COUNTERS)
+        wb.save(EXCEL_FILE)
+        print(f"✅ Создан файл {EXCEL_FILE}")
 
 
 def get_today_str():
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def ensure_today_exists(file_path, counters):
+def ensure_today_exists():
     today = get_today_str()
     try:
-        wb = load_workbook(file_path)
+        wb = load_workbook(EXCEL_FILE)
         ws = wb.active
         date_exists = False
         for row in range(2, ws.max_row + 1):
@@ -117,19 +95,19 @@ def ensure_today_exists(file_path, counters):
                 date_exists = True
                 break
         if not date_exists:
-            ws.append([today, ""] + [0] * len(counters))
-            wb.save(file_path)
+            ws.append([today, ""] + [0] * len(ALL_COUNTERS))
+            wb.save(EXCEL_FILE)
         wb.close()
     except Exception as e:
         print(f"Ошибка: {e}")
 
 
-def update_reading(file_path, counter_name, value, record_time, counters):
+def update_reading(counter_name, value, record_time):
     try:
         today = get_today_str()
-        ensure_today_exists(file_path, counters)
+        ensure_today_exists()
         
-        wb = load_workbook(file_path)
+        wb = load_workbook(EXCEL_FILE)
         ws = wb.active
         headers = [str(cell.value) if cell.value else "" for cell in ws[1]]
         
@@ -143,7 +121,7 @@ def update_reading(file_path, counter_name, value, record_time, counters):
             if ws.cell(row, 1).value == today:
                 ws.cell(row, col_idx).value = float(value)
                 ws.cell(row, 2).value = record_time
-                wb.save(file_path)
+                wb.save(EXCEL_FILE)
                 wb.close()
                 return True
         wb.close()
@@ -153,11 +131,11 @@ def update_reading(file_path, counter_name, value, record_time, counters):
         return False
 
 
-def get_all_data(file_path):
+def get_all_data():
     try:
-        if not os.path.exists(file_path):
+        if not os.path.exists(EXCEL_FILE):
             return []
-        wb = load_workbook(file_path)
+        wb = load_workbook(EXCEL_FILE)
         ws = wb.active
         headers = [str(cell.value) if cell.value else "" for cell in ws[1]][2:]
         result = []
@@ -180,11 +158,11 @@ def get_all_data(file_path):
         return []
 
 
-def get_counters_with_data(file_path):
+def get_counters_with_data():
     try:
-        if not os.path.exists(file_path):
+        if not os.path.exists(EXCEL_FILE):
             return []
-        wb = load_workbook(file_path)
+        wb = load_workbook(EXCEL_FILE)
         ws = wb.active
         headers = [str(cell.value) if cell.value else "" for cell in ws[1]][2:]
         counters_with_data = set()
@@ -201,23 +179,23 @@ def get_counters_with_data(file_path):
 
 
 # ============ EMAIL ============
-async def send_email_report(file_path, object_name):
-    if not os.path.exists(file_path):
+async def send_email_report():
+    if not os.path.exists(EXCEL_FILE):
         return False
     try:
         msg = EmailMessage()
-        msg['Subject'] = f"Отчёт по {object_name} за {datetime.now().strftime('%d.%m.%Y')}"
+        msg['Subject'] = f"Отчёт по энергоучёту за {datetime.now().strftime('%d.%m.%Y')}"
         msg['From'] = EMAIL_FROM
         msg['To'] = EMAIL_TO
-        msg.set_content(f"Отчёт по {object_name}\nДата: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
-        with open(file_path, 'rb') as f:
+        msg.set_content(f"Отчёт по потреблению электроэнергии.\nДата: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+        with open(EXCEL_FILE, 'rb') as f:
             msg.add_attachment(f.read(), maintype='application',
                                subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                               filename=f"{object_name}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+                               filename=f"Energy_rep_ELE_{datetime.now().strftime('%Y%m%d')}.xlsx")
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
             server.send_message(msg)
-        print(f"Отчёт по {object_name} отправлен")
+        print(f"Отчёт отправлен")
         return True
     except Exception as e:
         print(f"Ошибка email: {e}")
@@ -227,134 +205,101 @@ async def send_email_report(file_path, object_name):
 # ============ КЛАВИАТУРЫ ============
 def get_main_menu():
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(KeyboardButton("📊 ЭЭ ПЛК"))
-    keyboard.add(KeyboardButton("📊 ЭЭ Ресурс"))
+    keyboard.add(KeyboardButton("📝 Ввести показания"))
+    keyboard.add(KeyboardButton("📊 Статистика"))
+    keyboard.add(KeyboardButton("📋 Все счётчики"))
+    keyboard.add(KeyboardButton("✅ Счётчики с данными"))
     keyboard.add(KeyboardButton("📁 Скачать Excel"))
     keyboard.add(KeyboardButton("❓ Помощь"))
     return keyboard
 
 
-def get_object_keyboard():
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(InlineKeyboardButton("📊 ЭЭ ПЛК", callback_data="obj_ELE"))
-    keyboard.add(InlineKeyboardButton("📊 ЭЭ Ресурс", callback_data="obj_RES"))
+def get_group_keyboard():
+    """Клавиатура выбора группы (1 уровень)"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    for group_name in MENU.keys():
+        keyboard.add(InlineKeyboardButton(group_name, callback_data=f"group_{group_name}"))
     keyboard.add(InlineKeyboardButton("❌ Отмена", callback_data="cancel"))
     return keyboard
 
 
-async def show_groups(chat_id, object_type, menu, message_id=None):
-    """Показывает группы счётчиков (уровень 1)"""
+def get_counters_keyboard(group_name):
+    """Клавиатура выбора счётчика (2 уровень)"""
     keyboard = InlineKeyboardMarkup(row_width=1)
-    for group_name in menu.keys():
-        keyboard.add(InlineKeyboardButton(group_name, callback_data=f"{object_type}_group_{group_name}"))
-    keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="back_to_main"))
-    keyboard.add(InlineKeyboardButton("❌ Отмена", callback_data="cancel"))
-    
-    text = f"📁 {object_type} - Выберите группу:"
-    
-    if message_id:
-        await bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard)
-    else:
-        await bot.send_message(chat_id, text, reply_markup=keyboard)
-
-
-async def show_counters(chat_id, object_type, group_name, menu, message_id=None):
-    """Показывает счётчики в группе (уровень 2) — сразу с кнопкой ввода"""
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    for counter in menu[group_name]:
+    for counter in MENU[group_name]:
         text = counter[:40] if len(counter) > 40 else counter
-        keyboard.add(InlineKeyboardButton(text, callback_data=f"{object_type}_cnt_{counter}"))
-    keyboard.add(InlineKeyboardButton("🔙 Назад к группам", callback_data=f"{object_type}_back_groups"))
+        keyboard.add(InlineKeyboardButton(text, callback_data=f"cnt_{counter}"))
+    keyboard.add(InlineKeyboardButton("🔙 Назад к группам", callback_data="back_to_groups"))
     keyboard.add(InlineKeyboardButton("❌ Отмена", callback_data="cancel"))
-    
-    text = f"📁 {object_type} - {group_name} → Выберите счётчик:"
-    
-    if message_id:
-        await bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard)
-    else:
-        await bot.send_message(chat_id, text, reply_markup=keyboard)
+    return keyboard
 
 
 # ============ ОБРАБОТЧИКИ ============
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    init_excel(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
-    init_excel(EXCEL_RES_FILE, ALL_RES_COUNTERS)
-    ensure_today_exists(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
-    ensure_today_exists(EXCEL_RES_FILE, ALL_RES_COUNTERS)
-    
-    data_ele = get_all_data(EXCEL_ELE_FILE)
-    data_res = get_all_data(EXCEL_RES_FILE)
+    init_excel()
+    ensure_today_exists()
+    data = get_all_data()
+    counters_with_data = get_counters_with_data()
     
     text = (
         f"🏭 ЭНЕРГОУЧЁТ\n\n"
         f"📅 Сегодня: {datetime.now().strftime('%d.%m.%Y')}\n"
-        f"📊 ЭЭ ПЛК: {len(data_ele)} записей, {len(ALL_ELE_COUNTERS)} счётчиков\n"
-        f"📊 ЭЭ Ресурс: {len(data_res)} записей, {len(ALL_RES_COUNTERS)} счётчиков\n\n"
-        f"💡 Нажмите '📊 ЭЭ ПЛК' или '📊 ЭЭ Ресурс'"
+        f"📊 Записей: {len(data)}\n"
+        f"🏭 Счётчиков: {len(ALL_COUNTERS)}\n"
+        f"✅ Счётчиков с данными: {len(counters_with_data)}\n\n"
+        f"💡 Нажмите '📝 Ввести показания'"
     )
     await message.answer(text, reply_markup=get_main_menu())
 
 
-@dp.message_handler(lambda message: message.text == "📊 ЭЭ ПЛК")
-async def add_ele(message: types.Message, state: FSMContext):
-    await state.update_data(object_type="ELE", file_path=EXCEL_ELE_FILE, counters=ALL_ELE_COUNTERS)
-    await show_groups(message.chat.id, "ELE", ELE_MENU)
-    await state.set_state(EnergyForm.choosing_group)
-
-
-@dp.message_handler(lambda message: message.text == "📊 ЭЭ Ресурс")
-async def add_res(message: types.Message, state: FSMContext):
-    await state.update_data(object_type="RES", file_path=EXCEL_RES_FILE, counters=ALL_RES_COUNTERS)
-    await show_groups(message.chat.id, "RES", RES_MENU)
-    await state.set_state(EnergyForm.choosing_group)
-
-
-@dp.callback_query_handler(lambda c: c.data.startswith("ELE_group_"), state=EnergyForm.choosing_group)
-async def ele_group_selected(callback_query: types.CallbackQuery, state: FSMContext):
-    group_name = callback_query.data.replace("ELE_group_", "")
-    await state.update_data(selected_group=group_name)
-    await show_counters(callback_query.from_user.id, "ELE", group_name, ELE_MENU, callback_query.message.message_id)
-    await callback_query.answer()
-
-
-@dp.callback_query_handler(lambda c: c.data.startswith("RES_group_"), state=EnergyForm.choosing_group)
-async def res_group_selected(callback_query: types.CallbackQuery, state: FSMContext):
-    group_name = callback_query.data.replace("RES_group_", "")
-    await state.update_data(selected_group=group_name)
-    await show_counters(callback_query.from_user.id, "RES", group_name, RES_MENU, callback_query.message.message_id)
-    await callback_query.answer()
-
-
-@dp.callback_query_handler(lambda c: c.data == "ELE_back_groups", state=EnergyForm.choosing_group)
-async def ele_back_to_groups(callback_query: types.CallbackQuery, state: FSMContext):
-    await show_groups(callback_query.from_user.id, "ELE", ELE_MENU, callback_query.message.message_id)
-    await callback_query.answer()
-
-
-@dp.callback_query_handler(lambda c: c.data == "RES_back_groups", state=EnergyForm.choosing_group)
-async def res_back_to_groups(callback_query: types.CallbackQuery, state: FSMContext):
-    await show_groups(callback_query.from_user.id, "RES", RES_MENU, callback_query.message.message_id)
-    await callback_query.answer()
-
-
-@dp.callback_query_handler(lambda c: c.data.startswith("ELE_cnt_"), state=EnergyForm.choosing_group)
-async def ele_counter_selected(callback_query: types.CallbackQuery, state: FSMContext):
-    counter_name = callback_query.data.replace("ELE_cnt_", "")
-    await state.update_data(selected_counter=counter_name)
-    today = datetime.now().strftime("%d.%m.%Y")
-    await callback_query.message.edit_text(
-        f"✅ Выбран счётчик: {counter_name}\n\n"
-        f"📅 Дата: {today}\n"
-        f"✏️ Введите показание (кВт·ч):"
+@dp.message_handler(commands=["help"])
+@dp.message_handler(lambda message: message.text == "❓ Помощь")
+async def help_command(message: types.Message):
+    text = (
+        "📘 ПОМОЩЬ\n\n"
+        "/start - Главное меню\n"
+        "📝 Ввести показания - Выбрать счётчик и ввести значение\n"
+        "📊 Статистика - Общая статистика\n"
+        "📋 Все счётчики - Список всех счётчиков\n"
+        "✅ Счётчики с данными - Только с показаниями\n"
+        "📁 Скачать Excel - Скачать файл\n\n"
+        f"📊 Всего счётчиков: {len(ALL_COUNTERS)}"
     )
-    await state.set_state(EnergyForm.entering_value)
+    await message.answer(text, reply_markup=get_main_menu())
+
+
+@dp.message_handler(lambda message: message.text == "📝 Ввести показания")
+@dp.message_handler(commands=["add"])
+async def add_reading(message: types.Message, state: FSMContext):
+    await message.answer("📁 Выберите группу счётчиков:", reply_markup=get_group_keyboard())
+    await state.set_state(EnergyForm.choosing_group)
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("group_"), state=EnergyForm.choosing_group)
+async def group_selected(callback_query: types.CallbackQuery, state: FSMContext):
+    group_name = callback_query.data.replace("group_", "")
+    await state.update_data(selected_group=group_name)
+    await state.update_data(last_group=group_name)  # Запоминаем для возврата
+    await callback_query.message.edit_text(
+        f"📁 {group_name}\n\n👇 Выберите счётчик:",
+        reply_markup=get_counters_keyboard(group_name)
+    )
     await callback_query.answer()
 
 
-@dp.callback_query_handler(lambda c: c.data.startswith("RES_cnt_"), state=EnergyForm.choosing_group)
-async def res_counter_selected(callback_query: types.CallbackQuery, state: FSMContext):
-    counter_name = callback_query.data.replace("RES_cnt_", "")
+@dp.callback_query_handler(lambda c: c.data == "back_to_groups", state=EnergyForm.choosing_group)
+async def back_to_groups(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.edit_text(
+        "📁 Выберите группу счётчиков:",
+        reply_markup=get_group_keyboard()
+    )
+    await callback_query.answer()
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("cnt_"), state=EnergyForm.choosing_group)
+async def counter_selected(callback_query: types.CallbackQuery, state: FSMContext):
+    counter_name = callback_query.data.replace("cnt_", "")
     await state.update_data(selected_counter=counter_name)
     today = datetime.now().strftime("%d.%m.%Y")
     await callback_query.message.edit_text(
@@ -376,104 +321,100 @@ async def value_entered(message: types.Message, state: FSMContext):
         
         data = await state.get_data()
         counter = data['selected_counter']
-        file_path = data['file_path']
-        counters = data['counters']
-        object_type = data.get('object_type', 'ELE')
+        group = data.get('last_group', 'ЦРП 10кВ')
         record_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        if update_reading(file_path, counter, value, record_time, counters):
+        if update_reading(counter, value, record_time):
             await message.answer(
                 f"✅ Сохранено!\n\n"
-                f"📊 {object_type}\n"
                 f"🏭 {counter}\n"
                 f"⚡ {value:,.2f} кВт·ч\n"
-                f"⏰ {datetime.now().strftime('%H:%M:%S')}",
-                reply_markup=get_main_menu()
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             )
+            
+            # ВОЗВРАЩАЕМСЯ В МЕНЮ ВЫБОРА СЧЁТЧИКА (той же группы)
+            await message.answer(
+                f"📁 {group}\n\n👇 Выберите следующий счётчик:",
+                reply_markup=get_counters_keyboard(group)
+            )
+            await state.set_state(EnergyForm.choosing_group)
         else:
             await message.answer("❌ Ошибка при сохранении!", reply_markup=get_main_menu())
-        
-        await state.finish()
+            await state.finish()
         
     except ValueError:
         await message.answer("❌ Введите число (например: 125.5)")
 
 
 @dp.message_handler(commands=["stats"])
+@dp.message_handler(lambda message: message.text == "📊 Статистика")
 async def show_stats(message: types.Message):
-    data_ele = get_all_data(EXCEL_ELE_FILE)
-    data_res = get_all_data(EXCEL_RES_FILE)
+    data = get_all_data()
+    if not data:
+        await message.answer("📊 Нет данных", reply_markup=get_main_menu())
+        return
     
-    total_ele = sum(d['total'] for d in data_ele)
-    total_res = sum(d['total'] for d in data_res)
-    
-    text = (
-        f"📊 СТАТИСТИКА\n\n"
-        f"📊 ЭЭ ПЛК:\n"
-        f"   Записей: {len(data_ele)}\n"
-        f"   Сумма: {total_ele:,.2f} кВт·ч\n\n"
-        f"📊 ЭЭ Ресурс:\n"
-        f"   Записей: {len(data_res)}\n"
-        f"   Сумма: {total_res:,.2f} кВт·ч"
-    )
+    text = "📊 СТАТИСТИКА\n\n"
+    total = 0
+    for day in data[-10:]:
+        text += f"📅 {day['date']}: {day['total']:,.2f} кВт·ч\n"
+        total += day['total']
+    text += f"\n💰 ИТОГО: {total:,.2f} кВт·ч"
     await message.answer(text, reply_markup=get_main_menu())
 
 
-@dp.message_handler(lambda message: message.text == "📁 Скачать Excel")
+@dp.message_handler(commands=["counters"])
+@dp.message_handler(lambda message: message.text == "📋 Все счётчики")
+async def show_all_counters(message: types.Message):
+    text = "📋 ВСЕ СЧЁТЧИКИ ПО ГРУППАМ:\n\n"
+    for group, counters in MENU.items():
+        text += f"📁 {group}:\n"
+        for i, c in enumerate(counters, 1):
+            text += f"   {i}. {c}\n"
+        text += "\n"
+        if len(text) > 3500:
+            await message.answer(text)
+            text = ""
+    if text:
+        await message.answer(text, reply_markup=get_main_menu())
+
+
+@dp.message_handler(commands=["data_counters"])
+@dp.message_handler(lambda message: message.text == "✅ Счётчики с данными")
+async def show_counters_with_data(message: types.Message):
+    counters = get_counters_with_data()
+    if not counters:
+        await message.answer("✅ Нет счётчиков с данными", reply_markup=get_main_menu())
+        return
+    
+    text = "✅ СЧЁТЧИКИ С ДАННЫМИ:\n\n"
+    for i, c in enumerate(counters, 1):
+        text += f"{i}. {c}\n"
+        if len(text) > 3500:
+            await message.answer(text)
+            text = ""
+    if text:
+        await message.answer(text, reply_markup=get_main_menu())
+
+
 @dp.message_handler(commands=["file"])
+@dp.message_handler(lambda message: message.text == "📁 Скачать Excel")
 async def send_excel_file(message: types.Message):
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(InlineKeyboardButton("📊 ЭЭ ПЛК", callback_data="download_ELE"))
-    keyboard.add(InlineKeyboardButton("📊 ЭЭ Ресурс", callback_data="download_RES"))
-    await message.answer("Выберите файл:", reply_markup=keyboard)
-
-
-@dp.callback_query_handler(lambda c: c.data.startswith("download_"))
-async def download_file(callback_query: types.CallbackQuery):
-    obj = callback_query.data.replace("download_", "")
-    file_path = EXCEL_ELE_FILE if obj == "ELE" else EXCEL_RES_FILE
-    name = "ЭЭ ПЛК" if obj == "ELE" else "ЭЭ Ресурс"
-    
-    if os.path.exists(file_path):
-        doc = types.InputFile(file_path)
-        await bot.send_document(callback_query.from_user.id, doc, caption=f"📊 {name}\n{datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    if os.path.exists(EXCEL_FILE):
+        doc = types.InputFile(EXCEL_FILE)
+        await message.answer_document(doc, caption=f"📊 Файл учёта\n{datetime.now().strftime('%d.%m.%Y %H:%M')}")
     else:
-        await bot.send_message(callback_query.from_user.id, "❌ Файл не создан")
-    await callback_query.answer()
-
-
-@dp.message_handler(commands=["help"])
-@dp.message_handler(lambda message: message.text == "❓ Помощь")
-async def help_command(message: types.Message):
-    text = (
-        "📘 ПОМОЩЬ\n\n"
-        "/start - Главное меню\n"
-        "📊 ЭЭ ПЛК - Выбрать объект ПЛК\n"
-        "📊 ЭЭ Ресурс - Выбрать объект Ресурс\n"
-        "📁 Скачать Excel - Скачать файл\n"
-        "/stats - Статистика\n\n"
-        "После выбора объекта:\n"
-        "1. Выберите группу счётчиков\n"
-        "2. Выберите счётчик\n"
-        "3. Введите показание\n\n"
-        f"📊 Всего счётчиков: {len(ALL_ELE_COUNTERS)} (ПЛК), {len(ALL_RES_COUNTERS)} (Ресурс)"
-    )
-    await message.answer(text, reply_markup=get_main_menu())
+        await message.answer("❌ Файл не создан")
 
 
 @dp.message_handler(commands=["test_email"])
 async def test_email(message: types.Message):
     await message.answer("📧 Отправляю...")
-    r1 = await send_email_report(EXCEL_ELE_FILE, "ЭЭ_ПЛК")
-    r2 = await send_email_report(EXCEL_RES_FILE, "ЭЭ_Ресурс")
-    await message.answer(f"✅ ПЛК: {r1}, Ресурс: {r2}")
-
-
-@dp.callback_query_handler(lambda c: c.data == "back_to_main", state="*")
-async def back_to_main(callback_query: types.CallbackQuery, state: FSMContext):
-    await state.finish()
-    await callback_query.message.edit_text("Главное меню:", reply_markup=get_main_menu())
-    await callback_query.answer()
+    result = await send_email_report()
+    if result:
+        await message.answer("✅ Письмо отправлено!")
+    else:
+        await message.answer("❌ Ошибка отправки")
 
 
 @dp.callback_query_handler(lambda c: c.data == "cancel", state="*")
@@ -486,15 +427,15 @@ async def cancel_action(callback_query: types.CallbackQuery, state: FSMContext):
 
 if __name__ == "__main__":
     print("🚀 Бот запущен!")
-    print(f"📊 ПЛК: {len(ALL_ELE_COUNTERS)} счётчиков")
-    print(f"📊 Ресурс: {len(ALL_RES_COUNTERS)} счётчиков")
+    print(f"📁 Файл: {EXCEL_FILE}")
+    print(f"🏭 Счётчиков: {len(ALL_COUNTERS)}")
     
-    init_excel(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
-    init_excel(EXCEL_RES_FILE, ALL_RES_COUNTERS)
+    init_excel()
+    ensure_today_exists()
     
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
-    scheduler.add_job(lambda: send_email_report(EXCEL_ELE_FILE, "ЭЭ_ПЛК"), 'cron', day_of_week='mon', hour=12, minute=0)
-    scheduler.add_job(lambda: send_email_report(EXCEL_RES_FILE, "ЭЭ_Ресурс"), 'cron', day_of_week='mon', hour=12, minute=0)
+    scheduler.add_job(send_email_report, 'cron', day_of_week='mon', hour=12, minute=0)
     scheduler.start()
+    print("⏰ Отчёт: каждый понедельник в 12:00 МСК")
     
     executor.start_polling(dp, skip_updates=True)
