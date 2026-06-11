@@ -27,7 +27,7 @@ EMAIL_PASSWORD = "bmdt pzqh qdme wgnc"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
 
-# ============ МЕНЮ (ТОЛЬКО 2 УРОВНЯ: ГРУППА → СЧЁТЧИК) ============
+# ============ МЕНЮ (2 УРОВНЯ: ГРУППА → СЧЁТЧИК) ============
 MENU = {
     "ЦРП 10кВ": ["ЦРП В1", "ЦРП В2", "ЦРП ТП1, СШ1", "ЦРП ТП1, СШ2",
                  "ЦРП ТП2, СШ1", "ЦРП ТП2, СШ2", "ЦРП ТП3, СШ1", "ЦРП ТП3, СШ2",
@@ -58,7 +58,6 @@ MENU = {
     "Прочее": ["ТП Луговская", "Склад газации", "Временно ТП-3"]
 }
 
-# Плоский список всех счётчиков
 ALL_COUNTERS = []
 for counters in MENU.values():
     ALL_COUNTERS.extend(counters)
@@ -67,7 +66,6 @@ for counters in MENU.values():
 class EnergyForm(StatesGroup):
     choosing_group = State()
     entering_value = State()
-    last_group = State()  # Запоминаем последнюю группу для возврата
 
 
 # ============ ФУНКЦИИ EXCEL ============
@@ -77,7 +75,6 @@ def init_excel():
         ws = wb.active
         ws.append(["Дата", "Время записи"] + ALL_COUNTERS)
         wb.save(EXCEL_FILE)
-        print(f"✅ Создан файл {EXCEL_FILE}")
 
 
 def get_today_str():
@@ -98,8 +95,8 @@ def ensure_today_exists():
             ws.append([today, ""] + [0] * len(ALL_COUNTERS))
             wb.save(EXCEL_FILE)
         wb.close()
-    except Exception as e:
-        print(f"Ошибка: {e}")
+    except:
+        pass
 
 
 def update_reading(counter_name, value, record_time):
@@ -126,8 +123,7 @@ def update_reading(counter_name, value, record_time):
                 return True
         wb.close()
         return False
-    except Exception as e:
-        print(f"Ошибка: {e}")
+    except:
         return False
 
 
@@ -137,24 +133,21 @@ def get_all_data():
             return []
         wb = load_workbook(EXCEL_FILE)
         ws = wb.active
-        headers = [str(cell.value) if cell.value else "" for cell in ws[1]][2:]
         result = []
         for row in range(2, ws.max_row + 1):
             date = ws.cell(row, 1).value
-            record_time = ws.cell(row, 2).value
             if not date:
                 continue
-            row_data = {"date": date, "time": record_time, "total": 0}
-            for idx, counter in enumerate(headers, start=3):
-                val = ws.cell(row, idx).value
+            total = 0
+            for col in range(3, ws.max_column + 1):
+                val = ws.cell(row, col).value
                 if val and isinstance(val, (int, float)) and val != 0:
-                    row_data["total"] += val
-            if row_data["total"] > 0:
-                result.append(row_data)
+                    total += val
+            if total > 0:
+                result.append({"date": date, "total": total})
         wb.close()
         return result
-    except Exception as e:
-        print(f"Ошибка: {e}")
+    except:
         return []
 
 
@@ -173,8 +166,7 @@ def get_counters_with_data():
                     counters_with_data.add(counter)
         wb.close()
         return list(counters_with_data)
-    except Exception as e:
-        print(f"Ошибка: {e}")
+    except:
         return []
 
 
@@ -184,10 +176,10 @@ async def send_email_report():
         return False
     try:
         msg = EmailMessage()
-        msg['Subject'] = f"Отчёт по энергоучёту за {datetime.now().strftime('%d.%m.%Y')}"
+        msg['Subject'] = f"Отчёт за {datetime.now().strftime('%d.%m.%Y')}"
         msg['From'] = EMAIL_FROM
         msg['To'] = EMAIL_TO
-        msg.set_content(f"Отчёт по потреблению электроэнергии.\nДата: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+        msg.set_content(f"Отчёт по потреблению\nДата: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
         with open(EXCEL_FILE, 'rb') as f:
             msg.add_attachment(f.read(), maintype='application',
                                subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -195,10 +187,8 @@ async def send_email_report():
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
             server.send_message(msg)
-        print(f"Отчёт отправлен")
         return True
-    except Exception as e:
-        print(f"Ошибка email: {e}")
+    except:
         return False
 
 
@@ -215,7 +205,6 @@ def get_main_menu():
 
 
 def get_group_keyboard():
-    """Клавиатура выбора группы (1 уровень)"""
     keyboard = InlineKeyboardMarkup(row_width=1)
     for group_name in MENU.keys():
         keyboard.add(InlineKeyboardButton(group_name, callback_data=f"group_{group_name}"))
@@ -224,7 +213,6 @@ def get_group_keyboard():
 
 
 def get_counters_keyboard(group_name):
-    """Клавиатура выбора счётчика (2 уровень)"""
     keyboard = InlineKeyboardMarkup(row_width=1)
     for counter in MENU[group_name]:
         text = counter[:40] if len(counter) > 40 else counter
@@ -259,9 +247,9 @@ async def help_command(message: types.Message):
     text = (
         "📘 ПОМОЩЬ\n\n"
         "/start - Главное меню\n"
-        "📝 Ввести показания - Выбрать счётчик и ввести значение\n"
+        "📝 Ввести показания - Выбрать счётчик\n"
         "📊 Статистика - Общая статистика\n"
-        "📋 Все счётчики - Список всех счётчиков\n"
+        "📋 Все счётчики - Список всех\n"
         "✅ Счётчики с данными - Только с показаниями\n"
         "📁 Скачать Excel - Скачать файл\n\n"
         f"📊 Всего счётчиков: {len(ALL_COUNTERS)}"
@@ -280,7 +268,6 @@ async def add_reading(message: types.Message, state: FSMContext):
 async def group_selected(callback_query: types.CallbackQuery, state: FSMContext):
     group_name = callback_query.data.replace("group_", "")
     await state.update_data(selected_group=group_name)
-    await state.update_data(last_group=group_name)  # Запоминаем для возврата
     await callback_query.message.edit_text(
         f"📁 {group_name}\n\n👇 Выберите счётчик:",
         reply_markup=get_counters_keyboard(group_name)
@@ -321,18 +308,17 @@ async def value_entered(message: types.Message, state: FSMContext):
         
         data = await state.get_data()
         counter = data['selected_counter']
-        group = data.get('last_group', 'ЦРП 10кВ')
+        group = data['selected_group']
         record_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         if update_reading(counter, value, record_time):
+            # Отправляем подтверждение и сразу возвращаемся к списку счётчиков
             await message.answer(
                 f"✅ Сохранено!\n\n"
                 f"🏭 {counter}\n"
-                f"⚡ {value:,.2f} кВт·ч\n"
-                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+                f"⚡ {value:,.2f} кВт·ч"
             )
-            
-            # ВОЗВРАЩАЕМСЯ В МЕНЮ ВЫБОРА СЧЁТЧИКА (той же группы)
+            # Возвращаемся к выбору счётчика в той же группе (НОВЫМ СООБЩЕНИЕМ)
             await message.answer(
                 f"📁 {group}\n\n👇 Выберите следующий счётчик:",
                 reply_markup=get_counters_keyboard(group)
@@ -366,17 +352,13 @@ async def show_stats(message: types.Message):
 @dp.message_handler(commands=["counters"])
 @dp.message_handler(lambda message: message.text == "📋 Все счётчики")
 async def show_all_counters(message: types.Message):
-    text = "📋 ВСЕ СЧЁТЧИКИ ПО ГРУППАМ:\n\n"
+    text = "📋 ВСЕ СЧЁТЧИКИ:\n\n"
     for group, counters in MENU.items():
         text += f"📁 {group}:\n"
         for i, c in enumerate(counters, 1):
             text += f"   {i}. {c}\n"
         text += "\n"
-        if len(text) > 3500:
-            await message.answer(text)
-            text = ""
-    if text:
-        await message.answer(text, reply_markup=get_main_menu())
+    await message.answer(text, reply_markup=get_main_menu())
 
 
 @dp.message_handler(commands=["data_counters"])
@@ -390,11 +372,7 @@ async def show_counters_with_data(message: types.Message):
     text = "✅ СЧЁТЧИКИ С ДАННЫМИ:\n\n"
     for i, c in enumerate(counters, 1):
         text += f"{i}. {c}\n"
-        if len(text) > 3500:
-            await message.answer(text)
-            text = ""
-    if text:
-        await message.answer(text, reply_markup=get_main_menu())
+    await message.answer(text, reply_markup=get_main_menu())
 
 
 @dp.message_handler(commands=["file"])
@@ -411,17 +389,14 @@ async def send_excel_file(message: types.Message):
 async def test_email(message: types.Message):
     await message.answer("📧 Отправляю...")
     result = await send_email_report()
-    if result:
-        await message.answer("✅ Письмо отправлено!")
-    else:
-        await message.answer("❌ Ошибка отправки")
+    await message.answer(f"✅ Результат: {result}")
 
 
 @dp.callback_query_handler(lambda c: c.data == "cancel", state="*")
 async def cancel_action(callback_query: types.CallbackQuery, state: FSMContext):
     await state.finish()
-    await callback_query.message.edit_text("❌ Отменено")
-    await callback_query.message.answer("Главное меню:", reply_markup=get_main_menu())
+    await callback_query.message.delete()
+    await callback_query.message.answer("❌ Отменено", reply_markup=get_main_menu())
     await callback_query.answer()
 
 
@@ -436,6 +411,5 @@ if __name__ == "__main__":
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
     scheduler.add_job(send_email_report, 'cron', day_of_week='mon', hour=12, minute=0)
     scheduler.start()
-    print("⏰ Отчёт: каждый понедельник в 12:00 МСК")
     
     executor.start_polling(dp, skip_updates=True)
