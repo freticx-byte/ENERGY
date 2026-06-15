@@ -222,8 +222,10 @@ async def send_email_report(file_path, name):
 # ============ КЛАВИАТУРЫ ============
 def get_main_menu():
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(KeyboardButton("📊 ЭЭ ПЛК"))
-    keyboard.add(KeyboardButton("📊 ЭЭ Ресурс"))
+    keyboard.add(KeyboardButton("📝 Ввести показания"))
+    keyboard.add(KeyboardButton("📊 Статистика"))
+    keyboard.add(KeyboardButton("📋 Все счётчики"))
+    keyboard.add(KeyboardButton("✅ Счётчики с данными"))
     keyboard.add(KeyboardButton("📁 Скачать Excel"))
     keyboard.add(KeyboardButton("❓ Помощь"))
     return keyboard
@@ -269,23 +271,44 @@ async def start(message: types.Message):
         f"📅 Сегодня: {datetime.now().strftime('%d.%m.%Y')}\n"
         f"📊 ЭЭ ПЛК: {len(data_ele)} записей, {len(ALL_ELE_COUNTERS)} счётчиков\n"
         f"📊 ЭЭ Ресурс: {len(data_res)} записей, {len(ALL_RES_COUNTERS)} счётчиков\n\n"
-        f"💡 Нажмите '📊 ЭЭ ПЛК' или '📊 ЭЭ Ресурс'"
+        f"💡 Нажмите '📝 Ввести показания'"
     )
     await message.answer(text, reply_markup=get_main_menu())
 
 
-@dp.message_handler(lambda message: message.text == "📊 ЭЭ ПЛК")
-async def add_ele(message: types.Message, state: FSMContext):
-    await state.update_data(object_type="ELE", file_path=EXCEL_ELE_FILE, counters=ALL_ELE_COUNTERS, menu=ELE_MENU)
-    await message.answer("📁 Выберите группу ПЛК:", reply_markup=get_group_keyboard(ELE_MENU))
-    await state.set_state(EnergyForm.choosing_group)
+@dp.message_handler(commands=["help"])
+@dp.message_handler(lambda message: message.text == "❓ Помощь")
+async def help_command(message: types.Message):
+    text = (
+        "📘 ПОМОЩЬ\n\n"
+        "📝 Ввести показания - Выбор объекта → группы → счётчика\n"
+        "📊 Статистика - Общая статистика\n"
+        "📋 Все счётчики - Список всех\n"
+        "✅ Счётчики с данными - Только с показаниями\n"
+        "📁 Скачать Excel - Скачать файл\n\n"
+        f"📊 Всего счётчиков: {len(ALL_ELE_COUNTERS)} (ПЛК) + {len(ALL_RES_COUNTERS)} (Ресурс)"
+    )
+    await message.answer(text, reply_markup=get_main_menu())
 
 
-@dp.message_handler(lambda message: message.text == "📊 ЭЭ Ресурс")
-async def add_res(message: types.Message, state: FSMContext):
-    await state.update_data(object_type="RES", file_path=EXCEL_RES_FILE, counters=ALL_RES_COUNTERS, menu=RES_MENU)
-    await message.answer("📁 Выберите группу Ресурс:", reply_markup=get_group_keyboard(RES_MENU))
+@dp.message_handler(lambda message: message.text == "📝 Ввести показания")
+@dp.message_handler(commands=["add"])
+async def add_reading(message: types.Message, state: FSMContext):
+    await message.answer("📁 Выберите объект:", reply_markup=get_object_keyboard())
+    await state.set_state(EnergyForm.choosing_object)
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("obj_"), state=EnergyForm.choosing_object)
+async def object_selected(callback_query: types.CallbackQuery, state: FSMContext):
+    obj = callback_query.data.replace("obj_", "")
+    if obj == "ELE":
+        await state.update_data(object_type="ELE", file_path=EXCEL_ELE_FILE, counters=ALL_ELE_COUNTERS, menu=ELE_MENU)
+        await callback_query.message.edit_text("📁 Выберите группу ПЛК:", reply_markup=get_group_keyboard(ELE_MENU))
+    else:
+        await state.update_data(object_type="RES", file_path=EXCEL_RES_FILE, counters=ALL_RES_COUNTERS, menu=RES_MENU)
+        await callback_query.message.edit_text("📁 Выберите группу Ресурс:", reply_markup=get_group_keyboard(RES_MENU))
     await state.set_state(EnergyForm.choosing_group)
+    await callback_query.answer()
 
 
 @dp.callback_query_handler(lambda c: c.data.startswith("group_"), state=EnergyForm.choosing_group)
@@ -346,13 +369,14 @@ async def value_entered(message: types.Message, state: FSMContext):
         
         if update_reading(file_path, counter, value, record_time, counters):
             await message.answer(f"✅ Сохранено!\n\n🏭 {counter}\n⚡ {value:,.2f} кВт·ч")
+            # Возврат к выбору счётчика в той же группе
             await message.answer(
                 f"📁 {group}\n\n👇 Выберите следующий счётчик:",
                 reply_markup=get_counters_keyboard(group, menu)
             )
             await state.set_state(EnergyForm.choosing_group)
         else:
-            await message.answer("❌ Ошибка при сохранении!", reply_markup=get_main_menu())
+            await message.answer("❌ Ошибка при сохранении!\n\nВозможно, такого счётчика нет в файле.", reply_markup=get_main_menu())
             await state.finish()
         
     except ValueError:
@@ -376,6 +400,40 @@ async def show_stats(message: types.Message):
         f"   Записей: {len(data_res)}\n"
         f"   Сумма: {total_res:,.2f} кВт·ч"
     )
+    await message.answer(text, reply_markup=get_main_menu())
+
+
+@dp.message_handler(commands=["counters"])
+@dp.message_handler(lambda message: message.text == "📋 Все счётчики")
+async def show_all_counters(message: types.Message):
+    text = "📋 ВСЕ СЧЁТЧИКИ ПЛК:\n\n"
+    for group, counters in ELE_MENU.items():
+        text += f"📁 {group}:\n"
+        for i, c in enumerate(counters, 1):
+            text += f"   {i}. {c}\n"
+        text += "\n"
+    text += "\n📋 ВСЕ СЧЁТЧИКИ РЕСУРС:\n\n"
+    for group, counters in RES_MENU.items():
+        text += f"📁 {group}:\n"
+        for i, c in enumerate(counters, 1):
+            text += f"   {i}. {c}\n"
+        text += "\n"
+    await message.answer(text, reply_markup=get_main_menu())
+
+
+@dp.message_handler(commands=["data_counters"])
+@dp.message_handler(lambda message: message.text == "✅ Счётчики с данными")
+async def show_counters_with_data(message: types.Message):
+    ele_counters = get_counters_with_data(EXCEL_ELE_FILE)
+    res_counters = get_counters_with_data(EXCEL_RES_FILE)
+    
+    text = "✅ СЧЁТЧИКИ С ДАННЫМИ:\n\n"
+    text += "📊 ЭЭ ПЛК:\n"
+    for i, c in enumerate(ele_counters, 1):
+        text += f"   {i}. {c}\n"
+    text += "\n📊 ЭЭ Ресурс:\n"
+    for i, c in enumerate(res_counters, 1):
+        text += f"   {i}. {c}\n"
     await message.answer(text, reply_markup=get_main_menu())
 
 
@@ -408,22 +466,6 @@ async def test_email(message: types.Message):
     r1 = await send_email_report(EXCEL_ELE_FILE, "ЭЭ_ПЛК")
     r2 = await send_email_report(EXCEL_RES_FILE, "ЭЭ_Ресурс")
     await message.answer(f"✅ ПЛК: {r1}, Ресурс: {r2}")
-
-
-@dp.message_handler(commands=["help"])
-@dp.message_handler(lambda message: message.text == "❓ Помощь")
-async def help_command(message: types.Message):
-    text = (
-        "📘 ПОМОЩЬ\n\n"
-        "📊 ЭЭ ПЛК - Ввод показаний ПЛК\n"
-        "📊 ЭЭ Ресурс - Ввод показаний Ресурс\n"
-        "📁 Скачать Excel - Скачать файл\n"
-        "/stats - Общая статистика\n"
-        "/test_email - Проверить почту\n\n"
-        f"📊 ПЛК: {len(ALL_ELE_COUNTERS)} счётчиков\n"
-        f"📊 Ресурс: {len(ALL_RES_COUNTERS)} счётчиков"
-    )
-    await message.answer(text, reply_markup=get_main_menu())
 
 
 @dp.callback_query_handler(lambda c: c.data == "cancel", state="*")
