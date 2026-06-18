@@ -116,7 +116,6 @@ def sync_excel_counters(file_path, counters):
             added += 1
     
     if added > 0:
-        # Заполняем нулями существующие строки
         for row in range(2, ws.max_row + 1):
             for col in range(len(headers) + 1, ws.max_column + 1):
                 ws.cell(row, col, value=0)
@@ -126,7 +125,6 @@ def sync_excel_counters(file_path, counters):
 
 
 def init_excel(file_path, counters):
-    """Инициализация Excel с синхронизацией"""
     sync_excel_counters(file_path, counters)
 
 
@@ -147,10 +145,9 @@ def ensure_today_exists(file_path, counters):
         if not date_exists:
             ws.append([today, ""] + [0] * len(counters))
             wb.save(file_path)
-            print(f"✅ Добавлена дата {today} в {file_path}")
         wb.close()
-    except Exception as e:
-        print(f"Ошибка ensure_today_exists: {e}")
+    except:
+        pass
 
 
 def update_reading(file_path, counter_name, value, record_time, counters):
@@ -163,7 +160,6 @@ def update_reading(file_path, counter_name, value, record_time, counters):
         headers = [str(cell.value) if cell.value else "" for cell in ws[1]]
         
         if counter_name not in headers:
-            print(f"❌ Счётчик {counter_name} не найден в {file_path}")
             wb.close()
             return False
         
@@ -171,17 +167,14 @@ def update_reading(file_path, counter_name, value, record_time, counters):
         
         for row in range(2, ws.max_row + 1):
             if ws.cell(row, 1).value == today:
-                old_value = ws.cell(row, col_idx).value
                 ws.cell(row, col_idx).value = float(value)
                 ws.cell(row, 2).value = record_time
                 wb.save(file_path)
                 wb.close()
-                print(f"✅ Сохранено: {counter_name} = {value} (было {old_value})")
                 return True
         wb.close()
         return False
-    except Exception as e:
-        print(f"Ошибка update_reading: {e}")
+    except:
         return False
 
 
@@ -246,8 +239,7 @@ async def send_email_report(file_path, name):
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
             server.send_message(msg)
         return True
-    except Exception as e:
-        print(f"Ошибка email: {e}")
+    except:
         return False
 
 
@@ -310,44 +302,8 @@ async def start(message: types.Message):
     await message.answer(text, reply_markup=get_main_menu())
 
 
-@dp.message_handler(commands=["help"])
-@dp.message_handler(lambda message: message.text == "❓ Помощь")
-async def help_command(message: types.Message):
-    text = (
-        "📘 ПОМОЩЬ И КОМАНДЫ\n\n"
-        "ОСНОВНЫЕ КОМАНДЫ:\n"
-        "/start - Главное меню\n"
-        "/add - Ввести показания\n"
-        "/stats - Общая статистика\n"
-        "/counters - Список всех счётчиков\n"
-        "/data_counters - Счётчики с данными\n"
-        "/file - Скачать Excel файл\n"
-        "/help - Эта справка\n\n"
-        "ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ:\n"
-        "/sync - Обновить список счётчиков в Excel\n"
-        "/test_email - Проверить отправку email\n\n"
-        "КАК ВВЕСТИ ПОКАЗАНИЯ:\n"
-        "1. Нажмите '📝 Ввести показания' или /add\n"
-        "2. Выберите объект: ЭЭ ПЛК или ЭЭ Ресурс\n"
-        "3. Выберите группу счётчиков\n"
-        "4. Выберите конкретный счётчик\n"
-        "5. Введите показание (число в кВт·ч)\n\n"
-        "СТАТИСТИКА:\n"
-        "• Все показания записываются на СЕГОДНЯ\n"
-        "• Время записи фиксируется автоматически\n"
-        "• Отчёт на email: каждый понедельник в 12:00\n\n"
-        f"ВСЕГО СЧЁТЧИКОВ:\n"
-        f"   ЭЭ ПЛК: {len(ALL_ELE_COUNTERS)}\n"
-        f"   ЭЭ Ресурс: {len(ALL_RES_COUNTERS)}\n\n"
-        "📁 Скачать файл: /file\n"
-        "📧 Проверить email: /test_email"
-    )
-    await message.answer(text, reply_markup=get_main_menu())  # ← убрал parse_mode="Markdown"
-
-
 @dp.message_handler(commands=["sync"])
 async def sync_command(message: types.Message):
-    """Принудительная синхронизация счётчиков с Excel"""
     sync_excel_counters(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
     sync_excel_counters(EXCEL_RES_FILE, ALL_RES_COUNTERS)
     await message.answer(f"✅ Счётчики синхронизированы!\nПЛК: {len(ALL_ELE_COUNTERS)}, Ресурс: {len(ALL_RES_COUNTERS)}")
@@ -429,23 +385,8 @@ async def value_entered(message: types.Message, state: FSMContext):
         menu = data.get('menu')
         record_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Проверяем, есть ли счётчик в Excel
-        wb = load_workbook(file_path)
-        headers = [str(cell.value) if cell.value else "" for cell in wb.active[1]]
-        wb.close()
-        
-        if counter not in headers:
-            await message.answer(
-                f"❌ Счётчик '{counter}' не найден в файле!\n\n"
-                f"Используйте команду /sync для синхронизации счётчиков с Excel.",
-                reply_markup=get_main_menu()
-            )
-            await state.finish()
-            return
-        
         if update_reading(file_path, counter, value, record_time, counters):
             await message.answer(f"✅ Сохранено!\n\n🏭 {counter}\n⚡ {value:,.2f} кВт·ч")
-            # Возврат к выбору счётчика в той же группе
             await message.answer(
                 f"📁 {group}\n\n👇 Выберите следующий счётчик:",
                 reply_markup=get_counters_keyboard(group, menu)
@@ -544,6 +485,41 @@ async def test_email(message: types.Message):
     await message.answer(f"✅ ПЛК: {r1}, Ресурс: {r2}")
 
 
+@dp.message_handler(commands=["help"])
+@dp.message_handler(lambda message: message.text == "❓ Помощь")
+async def help_command(message: types.Message):
+    text = (
+        "📘 ПОМОЩЬ И КОМАНДЫ\n\n"
+        "ОСНОВНЫЕ КОМАНДЫ:\n"
+        "/start - Главное меню\n"
+        "/add - Ввести показания\n"
+        "/stats - Общая статистика\n"
+        "/counters - Список всех счётчиков\n"
+        "/data_counters - Счётчики с данными\n"
+        "/file - Скачать Excel файл\n"
+        "/help - Эта справка\n\n"
+        "ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ:\n"
+        "/sync - Обновить список счётчиков в Excel\n"
+        "/test_email - Проверить отправку email\n\n"
+        "КАК ВВЕСТИ ПОКАЗАНИЯ:\n"
+        "1. Нажмите '📝 Ввести показания' или /add\n"
+        "2. Выберите объект: ЭЭ ПЛК или ЭЭ Ресурс\n"
+        "3. Выберите группу счётчиков\n"
+        "4. Выберите конкретный счётчик\n"
+        "5. Введите показание (число в кВт·ч)\n\n"
+        "СТАТИСТИКА:\n"
+        "• Все показания записываются на СЕГОДНЯ\n"
+        "• Время записи фиксируется автоматически\n"
+        "• Отчёт на email: каждый понедельник в 12:00\n\n"
+        f"ВСЕГО СЧЁТЧИКОВ:\n"
+        f"   ЭЭ ПЛК: {len(ALL_ELE_COUNTERS)}\n"
+        f"   ЭЭ Ресурс: {len(ALL_RES_COUNTERS)}\n\n"
+        "📁 Скачать файл: /file\n"
+        "📧 Проверить email: /test_email"
+    )
+    await message.answer(text, reply_markup=get_main_menu())
+
+
 @dp.callback_query_handler(lambda c: c.data == "cancel", state="*")
 async def cancel_action(callback_query: types.CallbackQuery, state: FSMContext):
     await state.finish()
@@ -557,7 +533,6 @@ if __name__ == "__main__":
     print(f"📊 ПЛК: {len(ALL_ELE_COUNTERS)} счётчиков")
     print(f"📊 Ресурс: {len(ALL_RES_COUNTERS)} счётчиков")
     
-    # Синхронизация при запуске
     sync_excel_counters(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
     sync_excel_counters(EXCEL_RES_FILE, ALL_RES_COUNTERS)
     ensure_today_exists(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
