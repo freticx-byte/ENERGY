@@ -95,13 +95,39 @@ class EnergyForm(StatesGroup):
 
 
 # ============ ФУНКЦИИ EXCEL ============
-def init_excel(file_path, counters):
+def sync_excel_counters(file_path, counters):
+    """Добавляет недостающие счётчики в Excel файл"""
     if not os.path.exists(file_path):
         wb = Workbook()
         ws = wb.active
         ws.append(["Дата", "Время записи"] + counters)
         wb.save(file_path)
-        print(f"✅ Создан файл {file_path}")
+        print(f"✅ Создан файл {file_path} с {len(counters)} счётчиками")
+        return
+    
+    wb = load_workbook(file_path)
+    ws = wb.active
+    headers = [str(cell.value) if cell.value else "" for cell in ws[1]]
+    
+    added = 0
+    for counter in counters:
+        if counter not in headers:
+            ws.cell(1, ws.max_column + 1, value=counter)
+            added += 1
+    
+    if added > 0:
+        # Заполняем нулями существующие строки
+        for row in range(2, ws.max_row + 1):
+            for col in range(len(headers) + 1, ws.max_column + 1):
+                ws.cell(row, col, value=0)
+        wb.save(file_path)
+        print(f"✅ Добавлено {added} новых счётчиков в {file_path}")
+    wb.close()
+
+
+def init_excel(file_path, counters):
+    """Инициализация Excel с синхронизацией"""
+    sync_excel_counters(file_path, counters)
 
 
 def get_today_str():
@@ -121,9 +147,10 @@ def ensure_today_exists(file_path, counters):
         if not date_exists:
             ws.append([today, ""] + [0] * len(counters))
             wb.save(file_path)
+            print(f"✅ Добавлена дата {today} в {file_path}")
         wb.close()
-    except:
-        pass
+    except Exception as e:
+        print(f"Ошибка ensure_today_exists: {e}")
 
 
 def update_reading(file_path, counter_name, value, record_time, counters):
@@ -136,6 +163,7 @@ def update_reading(file_path, counter_name, value, record_time, counters):
         headers = [str(cell.value) if cell.value else "" for cell in ws[1]]
         
         if counter_name not in headers:
+            print(f"❌ Счётчик {counter_name} не найден в {file_path}")
             wb.close()
             return False
         
@@ -143,14 +171,17 @@ def update_reading(file_path, counter_name, value, record_time, counters):
         
         for row in range(2, ws.max_row + 1):
             if ws.cell(row, 1).value == today:
+                old_value = ws.cell(row, col_idx).value
                 ws.cell(row, col_idx).value = float(value)
                 ws.cell(row, 2).value = record_time
                 wb.save(file_path)
                 wb.close()
+                print(f"✅ Сохранено: {counter_name} = {value} (было {old_value})")
                 return True
         wb.close()
         return False
-    except:
+    except Exception as e:
+        print(f"Ошибка update_reading: {e}")
         return False
 
 
@@ -215,7 +246,8 @@ async def send_email_report(file_path, name):
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
             server.send_message(msg)
         return True
-    except:
+    except Exception as e:
+        print(f"Ошибка email: {e}")
         return False
 
 
@@ -262,6 +294,8 @@ def get_counters_keyboard(group_name, menu):
 async def start(message: types.Message):
     init_excel(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
     init_excel(EXCEL_RES_FILE, ALL_RES_COUNTERS)
+    ensure_today_exists(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
+    ensure_today_exists(EXCEL_RES_FILE, ALL_RES_COUNTERS)
     
     data_ele = get_all_data(EXCEL_ELE_FILE)
     data_res = get_all_data(EXCEL_RES_FILE)
@@ -289,6 +323,14 @@ async def help_command(message: types.Message):
         f"📊 Всего счётчиков: {len(ALL_ELE_COUNTERS)} (ПЛК) + {len(ALL_RES_COUNTERS)} (Ресурс)"
     )
     await message.answer(text, reply_markup=get_main_menu())
+
+
+@dp.message_handler(commands=["sync"])
+async def sync_command(message: types.Message):
+    """Принудительная синхронизация счётчиков с Excel"""
+    sync_excel_counters(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
+    sync_excel_counters(EXCEL_RES_FILE, ALL_RES_COUNTERS)
+    await message.answer(f"✅ Счётчики синхронизированы!\nПЛК: {len(ALL_ELE_COUNTERS)}, Ресурс: {len(ALL_RES_COUNTERS)}")
 
 
 @dp.message_handler(lambda message: message.text == "📝 Ввести показания")
@@ -367,6 +409,20 @@ async def value_entered(message: types.Message, state: FSMContext):
         menu = data.get('menu')
         record_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        # Проверяем, есть ли счётчик в Excel
+        wb = load_workbook(file_path)
+        headers = [str(cell.value) if cell.value else "" for cell in wb.active[1]]
+        wb.close()
+        
+        if counter not in headers:
+            await message.answer(
+                f"❌ Счётчик '{counter}' не найден в файле!\n\n"
+                f"Используйте команду /sync для синхронизации счётчиков с Excel.",
+                reply_markup=get_main_menu()
+            )
+            await state.finish()
+            return
+        
         if update_reading(file_path, counter, value, record_time, counters):
             await message.answer(f"✅ Сохранено!\n\n🏭 {counter}\n⚡ {value:,.2f} кВт·ч")
             # Возврат к выбору счётчика в той же группе
@@ -376,7 +432,7 @@ async def value_entered(message: types.Message, state: FSMContext):
             )
             await state.set_state(EnergyForm.choosing_group)
         else:
-            await message.answer("❌ Ошибка при сохранении!\n\nВозможно, такого счётчика нет в файле.", reply_markup=get_main_menu())
+            await message.answer("❌ Ошибка при сохранении!", reply_markup=get_main_menu())
             await state.finish()
         
     except ValueError:
@@ -481,8 +537,11 @@ if __name__ == "__main__":
     print(f"📊 ПЛК: {len(ALL_ELE_COUNTERS)} счётчиков")
     print(f"📊 Ресурс: {len(ALL_RES_COUNTERS)} счётчиков")
     
-    init_excel(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
-    init_excel(EXCEL_RES_FILE, ALL_RES_COUNTERS)
+    # Синхронизация при запуске
+    sync_excel_counters(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
+    sync_excel_counters(EXCEL_RES_FILE, ALL_RES_COUNTERS)
+    ensure_today_exists(EXCEL_ELE_FILE, ALL_ELE_COUNTERS)
+    ensure_today_exists(EXCEL_RES_FILE, ALL_RES_COUNTERS)
     
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
     scheduler.add_job(lambda: send_email_report(EXCEL_ELE_FILE, "ЭЭ_ПЛК"), 'cron', day_of_week='mon', hour=12, minute=0)
